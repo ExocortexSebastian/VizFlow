@@ -418,3 +418,27 @@ tests/
 ├── test_enrichment.py
 └── test_fifo.py
 ```
+
+---
+
+## Future Considerations (Deferred from DDIA Review)
+
+### Fault Tolerance & Error Handling
+- Detailed failure modes and recovery strategies
+- Checkpointing and retry logic
+- Error handling patterns
+- Related to schema validation (see DESIGN.md Section 14)
+
+### Performance Characteristics
+- Storage format benchmarks (Parquet vs Feather)
+- Memory usage estimation formulas
+- Bottleneck identification and optimization checklist
+- Cluster sizing guidelines
+
+### Testing Strategy
+- Testing pyramid (unit/integration/E2E)
+- Property-based testing for FIFO invariants
+- Smoke tests on production data
+- Strategies for testing TB-scale pipelines locally
+
+*These topics are documented for future reference but not prioritized for current implementation phases.*

@@ -45,3 +45,6 @@ Thumbs.db
 
 # Package build
 *.whl
+
+# Documentation backups
+*.backup
