@@ -1,0 +1,137 @@
+"""Core operations for data transformation."""
+
+from __future__ import annotations
+
+import polars as pl
+
+from .config import get_config
+
+
+def parse_time(
+    df: pl.LazyFrame,
+    timestamp_col: str = "ticktime",
+) -> pl.LazyFrame:
+    """Parse HHMMSSMMM timestamp to time-of-day and elapsed milliseconds.
+
+    Adds two columns:
+    - tod_{timestamp_col}: pl.Time (time-of-day HH:MM:SS.mmm) - good for plotting
+    - elapsed_{timestamp_col}: pl.Int64 (milliseconds since market open)
+
+    Args:
+        df: Input LazyFrame
+        timestamp_col: Column with integer HHMMSSMMM format timestamps
+            e.g., 93012145 = 09:30:12.145, 142058425 = 14:20:58.425
+
+    Returns:
+        LazyFrame with tod and elapsed columns added
+
+    Raises:
+        RuntimeError: If config not set via set_config()
+        NotImplementedError: If market is not CN
+
+    Example:
+        >>> config = vf.Config(market="CN", input_dir=".", output_dir=".")
+        >>> vf.set_config(config)
+        >>> df = vf.parse_time(df, "ticktime")
+        >>> # Creates: tod_ticktime (pl.Time), elapsed_ticktime (pl.Int64)
+    """
+    config = get_config()
+
+    if config.market != "CN":
+        raise NotImplementedError(f"Market {config.market} not supported yet")
+
+    # Parse HHMMSSMMM to components
+    df = df.with_columns([
+        (pl.col(timestamp_col) // 10000000).alias("_hour"),
+        (pl.col(timestamp_col) // 100000 % 100).alias("_minute"),
+        (pl.col(timestamp_col) // 1000 % 100).alias("_second"),
+        (pl.col(timestamp_col) % 1000).alias("_ms"),
+    ])
+
+    # Add time-of-day column (pl.Time)
+    # Convert to nanoseconds since midnight
+    tod_ns = (
+        pl.col("_hour") * 3_600_000_000_000
+        + pl.col("_minute") * 60_000_000_000
+        + pl.col("_second") * 1_000_000_000
+        + pl.col("_ms") * 1_000_000
+    )
+    df = df.with_columns(tod_ns.cast(pl.Time).alias(f"tod_{timestamp_col}"))
+
+    # Add elapsed milliseconds (int)
+    # CN market: 09:30-11:30 (morning), 13:00-15:00 (afternoon)
+    # Using user's hardcoded logic
+    elapsed_ms = (
+        pl.when(pl.col("_hour") < 12)
+        .then(
+            # Morning session: from 09:30:00.000
+            (
+                (pl.col("_hour") - 9) * 3600
+                + (pl.col("_minute") - 30) * 60
+                + pl.col("_second")
+            )
+            * 1000
+            + pl.col("_ms")
+        )
+        .otherwise(
+            # Afternoon session: 2 hours of morning + time since 13:00
+            (
+                2 * 3600 + (pl.col("_hour") - 13) * 3600 + pl.col("_minute") * 60 + pl.col("_second")
+            )
+            * 1000
+            + pl.col("_ms")
+        )
+    )
+    df = df.with_columns(elapsed_ms.cast(pl.Int64).alias(f"elapsed_{timestamp_col}"))
+
+    # Drop temporary columns
+    df = df.drop(["_hour", "_minute", "_second", "_ms"])
+
+    return df
+
+
+def bin(df: pl.LazyFrame, widths: dict[str, float]) -> pl.LazyFrame:
+    """Add bin columns for specified columns.
+
+    Args:
+        df: Input LazyFrame
+        widths: Column name to bin width mapping
+
+    Returns:
+        LazyFrame with {col}_bin columns added
+
+    Formula:
+        bin_value = round(raw_value / binwidth)
+        actual_value = bin_value * binwidth  # To recover
+    """
+    exprs = [
+        (pl.col(col) / width).round().cast(pl.Int64).alias(f"{col}_bin")
+        for col, width in widths.items()
+    ]
+    return df.with_columns(exprs)
+
+
+def aggregate(
+    df: pl.LazyFrame,
+    group_by: list[str],
+    metrics: dict[str, pl.Expr],
+) -> pl.LazyFrame:
+    """Aggregate data with custom metrics.
+
+    Args:
+        df: Input LazyFrame
+        group_by: Columns to group by
+        metrics: Name to Polars expression mapping
+
+    Returns:
+        Aggregated LazyFrame
+
+    Example:
+        metrics = {
+            "count": pl.len(),
+            "total_qty": pl.col("quantity").sum(),
+            "vwap": pl.col("notional").sum() / pl.col("quantity").sum(),
+        }
+    """
+    agg_exprs = [expr.alias(name) for name, expr in metrics.items()]
+    return df.group_by(group_by).agg(agg_exprs)
