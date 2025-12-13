@@ -48,3 +48,6 @@ Thumbs.db
 
 # Documentation backups
 *.backup
+# PyPI credentials
+.pypirc
+secrets/
