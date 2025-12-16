@@ -194,7 +194,29 @@ trade_schema={"qty": ColumnSchema(cast_to=pl.Int64)}
 # When loading: qty 1.00000002 → 1
 ```
 
-### 4.6 Market Sessions
+### 4.6 Column Naming Conventions
+
+**Alpha vs Forward Return:**
+- `alpha_*` = Ŷ (predictions of forward returns)
+- `fret_*` = Y (actual forward returns)
+
+**Time suffix rule:**
+- ≤60s → use seconds: `alpha_10s`, `alpha_60s`
+- >60s → use minutes: `alpha_3m`, `alpha_30m`
+
+**Standard column names:**
+
+| Category | Standard Name | Description |
+|----------|---------------|-------------|
+| Symbol | `ukey` | Unique key for instrument |
+| Quote | `bid_px0`, `ask_px0` | Best bid/ask price |
+| Quote | `bid_size0`, `ask_size0` | Best bid/ask size |
+| Time | `timestamp`, `ticktime` | Event timestamp |
+| Alpha | `alpha_10s`, `alpha_60s` | Predictions (≤60s) |
+| Alpha | `alpha_3m`, `alpha_30m` | Predictions (>60s) |
+| Return | `fret_60s`, `fret_3m` | Actual forward returns |
+
+### 4.7 Market Sessions
 
 **Problem:** Wall-clock time ≠ trading time (lunch breaks, overnight gaps)
 

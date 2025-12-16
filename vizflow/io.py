@@ -149,7 +149,7 @@ def scan_trade(date: str, config: Config | None = None) -> pl.LazyFrame:
     config = config or get_config()
     path = config.get_trade_path(date)
     df = _scan_file(path)
-    return _apply_mapping(df, config)
+    return _apply_trade_mapping(df, config)
 
 
 def scan_trades(config: Config | None = None) -> pl.LazyFrame:
@@ -185,19 +185,27 @@ def scan_trades(config: Config | None = None) -> pl.LazyFrame:
     # Concatenate all files using lazy scanning
     dfs = [_scan_file(f) for f in files]
     df = pl.concat(dfs)
-    return _apply_mapping(df, config)
+    return _apply_trade_mapping(df, config)
 
 
-def _apply_mapping(df: pl.LazyFrame, config: Config) -> pl.LazyFrame:
-    """Apply column rename + schema evolution.
+def _apply_trade_mapping(df: pl.LazyFrame, config: Config) -> pl.LazyFrame:
+    """Apply column rename + schema evolution for trade data."""
+    df = _apply_rename(df, config)
+    for col_name, schema in config.trade_schema.items():
+        df = df.with_columns(pl.col(col_name).cast(schema.cast_to))
+    return df
 
-    Args:
-        df: Input LazyFrame
-        config: Config with mapping settings
 
-    Returns:
-        LazyFrame with mapping applied
-    """
+def _apply_alpha_mapping(df: pl.LazyFrame, config: Config) -> pl.LazyFrame:
+    """Apply column rename + schema evolution for alpha data."""
+    df = _apply_rename(df, config)
+    for col_name, schema in config.alpha_schema.items():
+        df = df.with_columns(pl.col(col_name).cast(schema.cast_to))
+    return df
+
+
+def _apply_rename(df: pl.LazyFrame, config: Config) -> pl.LazyFrame:
+    """Apply column rename from preset or custom mapping."""
     # Drop record type prefix column if present (from CSV files)
     existing = set(df.collect_schema().names())
     if "#HFTORD" in existing:
@@ -213,11 +221,58 @@ def _apply_mapping(df: pl.LazyFrame, config: Config) -> pl.LazyFrame:
         if to_rename:
             df = df.rename(to_rename)
 
-    # Schema evolution (type casting) - use renamed column names
-    for col_name, schema in config.trade_schema.items():
-        df = df.with_columns(pl.col(col_name).cast(schema.cast_to))
-
     return df
+
+
+def scan_alpha(date: str, config: Config | None = None) -> pl.LazyFrame:
+    """Scan single date alpha file with column mapping.
+
+    Args:
+        date: Date string, e.g. "20241001"
+        config: Config to use, or get_config() if None
+
+    Returns:
+        LazyFrame with column mapping and schema evolution applied
+
+    Example:
+        >>> config = vf.Config(
+        ...     alpha_dir=Path("/data/jyao/alpha"),
+        ...     alpha_pattern="alpha_{date}.feather",
+        ...     column_preset="jyao_v20251114",
+        ... )
+        >>> vf.set_config(config)
+        >>> df = vf.scan_alpha("20251114")
+    """
+    config = config or get_config()
+    path = config.get_alpha_path(date)
+    df = _scan_file(path)
+    return _apply_alpha_mapping(df, config)
+
+
+def scan_alphas(config: Config | None = None) -> pl.LazyFrame:
+    """Scan all alpha files with column mapping.
+
+    Args:
+        config: Config to use, or get_config() if None
+
+    Returns:
+        LazyFrame with column mapping and schema evolution applied
+
+    Raises:
+        ValueError: If alpha_dir is not set or no files found
+    """
+    config = config or get_config()
+    if config.alpha_dir is None:
+        raise ValueError("alpha_dir is not set in Config")
+
+    pattern = config.alpha_pattern.replace("{date}", "*")
+    files = sorted(config.alpha_dir.glob(pattern))
+    if not files:
+        raise ValueError(f"No files found matching {pattern} in {config.alpha_dir}")
+
+    dfs = [_scan_file(f) for f in files]
+    df = pl.concat(dfs)
+    return _apply_alpha_mapping(df, config)
 
 
 def _get_rename_map(config: Config) -> dict[str, str]:
@@ -232,8 +287,11 @@ def _get_rename_map(config: Config) -> dict[str, str]:
     if config.column_rename:
         return config.column_rename
     if config.column_preset:
-        from .presets import YLIN
+        from .presets import JYAO_V20251114, YLIN
 
-        presets = {"ylin": YLIN}
+        presets = {
+            "ylin": YLIN,
+            "jyao_v20251114": JYAO_V20251114,
+        }
         return presets.get(config.column_preset.lower(), {})
     return {}

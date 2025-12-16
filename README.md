@@ -22,15 +22,50 @@ import vizflow as vf
 print(vf.__version__)
 ```
 
-## Features (Planned)
+## Features
 
-- **Config**: Flexible column mapping and configuration
+- **Config**: Global configuration with column mapping presets
+- **Column Presets**: Auto-rename columns from different data sources
+  - `ylin` - Yuanzhao's meords trade format (52 columns)
+  - `jyao_v20251114` - jyao's alpha format
 - **Market**: Trading session handling (CN, crypto, etc.)
-- **I/O**: Load/save feather and parquet files
-- **Operations**: parse_time, bin, aggregate, forward_return
+- **I/O**: `scan_trade()`, `scan_alpha()` with automatic column mapping
+- **Operations**: `parse_time`, `bin`, `aggregate`
+- **Schema Evolution**: Type casting on load (e.g., Float64 → Int64)
+
+## Column Naming Convention
+
+| Type | Naming | Examples |
+|------|--------|----------|
+| Alpha (predictions) | `alpha_*` | `alpha_10s`, `alpha_60s`, `alpha_3m` |
+| Forward return | `fret_*` | `fret_60s`, `fret_3m` |
+| Time suffix | ≤60s: `s`, >60s: `m` | `alpha_60s`, `alpha_3m` |
+
+## Example
+
+```python
+import vizflow as vf
+from pathlib import Path
+
+# Configure with column preset
+config = vf.Config(
+    alpha_dir=Path("data/alpha"),
+    alpha_pattern="alpha_{date}.feather",
+    column_preset="jyao_v20251114",  # Auto-rename columns
+    market="CN",
+)
+vf.set_config(config)
+
+# Scan with automatic column mapping
+df = vf.scan_alpha("20251114")
+# Columns: alpha_10s, alpha_60s, alpha_3m, alpha_30m, bid_px0, ask_px0, ...
+```
+
+## Planned Features
+
 - **Enrichment**: Trade tagging, FIFO matching
 - **Execution**: Single-date, batch, and cluster processing
-- **Visualization**: Plotly/Dash dashboards (future)
+- **Visualization**: Plotly/Dash dashboards
 
 ## Requirements
 

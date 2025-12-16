@@ -61,3 +61,24 @@ YUANZHAO = {
 
 # Alias: ylin (Yuanzhao's username)
 YLIN = YUANZHAO
+
+# jyao's alpha format (v2025-11-14)
+JYAO_V20251114 = {
+    # Quote columns
+    "BidPrice1": "bid_px0",
+    "AskPrice1": "ask_px0",
+    "BidVolume1": "bid_size0",
+    "AskVolume1": "ask_size0",
+    # Time columns
+    "TimeStamp": "timestamp",
+    "GlobalExTime": "global_exchange_ts",
+    "DataDate": "data_date",
+    # Volume
+    "Volume": "volume",
+    # Alpha columns (Ŷ - predictions)
+    # Rule: ≤60s → s, >60s → m
+    "x10s": "alpha_10s",
+    "x60s": "alpha_60s",
+    "alpha1": "alpha_3m",
+    "alpha2": "alpha_30m",
+}
