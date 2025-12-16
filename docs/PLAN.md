@@ -1,444 +1,945 @@
 # VizFlow Implementation Plan
 
-> Phased implementation with testable, PyPI-publishable milestones
+> Implementation details, API specifications, and release process
 
 ---
+
+## Table of Contents
+
+### Part 1: Status & Roadmap
+- [Current Status](#current-status)
+- [Version Roadmap](#version-roadmap)
+
+### Part 2: API Specification
+- [Config & Context](#config--context)
+- [Market & Session](#market--session)
+- [Operations](#operations)
+- [Enrichment System](#enrichment-system)
+- [Execution](#execution)
+
+### Part 3: Implementation Phases
+- [Phase 0: Scaffolding](#phase-0-scaffolding-v010)
+- [Phase 1: Config + Market](#phase-1-config--market-v020)
+- [Phase 2: Core Operations](#phase-2-core-operations-v030-v040)
+- [Phase 3: Enrichment + FIFO](#phase-3-enrichment--fifo-v050)
+- [Phase 4: Forward Returns](#phase-4-forward-returns-v060)
+- [Phase 5: Execution](#phase-5-execution-v070)
+- [Phase 6: Visualization](#phase-6-visualization-v080)
+
+### Part 4: Release Process
+- [Versioning](#versioning)
+- [Release Checklist](#release-checklist)
+
+---
+
+# Part 1: Status & Roadmap
+
+## Current Status
+
+**Current Version:** v0.4.0 (published to PyPI)
+**Next Version:** v0.5.0 (Enrichment + FIFO)
+
+| Component | Status | Version |
+|-----------|--------|---------|
+| Config, set_config, get_config | DONE | v0.4.0 |
+| Market, Session, CN | DONE | v0.2.0 |
+| parse_time | DONE | v0.3.0 |
+| bin | DONE | v0.3.0 |
+| aggregate | DONE | v0.3.0 |
+| **Enrichment + FIFO** | **NEXT** | v0.5.0 |
+| forward_return | TODO | v0.6.0 |
+| run, run_batch, run_cluster | TODO | v0.7.0 |
 
 ## Version Roadmap
 
-| Phase | Version | Status | Key Features |
-|-------|---------|--------|--------------|
-| 0 | 0.1.0 | [ ] | Project scaffolding, installable |
-| 1 | 0.2.0 | [ ] | Config, Market (CN), I/O |
-| 2 | 0.3.0 | [ ] | parse_time, bin, aggregate |
-| 3 | 0.4.0 | [ ] | forward_return, calendar |
-| 4 | 0.5.0 | [ ] | run, run_batch, run_local, run_cluster |
-| 5 | 0.6.0 | [ ] | Enricher, TagCondition, TagRunning |
-| 6 | 0.7.0 | [ ] | FIFOMatch (trade splitting) |
-| 7 | 0.8.0 | [ ] | Visualization (future) |
+| Version | Features | Pipeline Stage |
+|---------|----------|----------------|
+| 0.1.0 | Scaffolding | - |
+| 0.2.0 | Config, Market | Stage 0 |
+| 0.3.0 | parse_time, bin, aggregate | Stage 1, 4 |
+| 0.4.0 | Global config refactor | Stage 0 |
+| **0.5.0** | **Enrichment + FIFO** | **Stage 2 (Replay)** |
+| 0.6.0 | forward_return, calendar | Stage 3 |
+| 0.7.0 | run, run_batch, run_cluster | Execution |
+| 0.8.0 | Visualization (Dash) | Optional |
+| 0.9.0 | API freeze, polish | Stabilization |
+| 1.0.0 | Production release | Milestone |
 
 ---
 
-## Phase 0: Project Scaffolding
+# Part 2: API Specification
 
-**Goal**: Installable package skeleton on PyPI
+## Config & Context
 
-### Steps
+### ColumnSchema
 
-- [ ] **0.1** Create directory structure
-  ```
-  vizflow/
-  ├── __init__.py
-  ├── py.typed
-  pyproject.toml
-  README.md
-  tests/
-  └── __init__.py
-  ```
+Schema for type casting on load.
 
-- [ ] **0.2** Write `pyproject.toml`
-  - Project metadata (name, version, description)
-  - Dependencies: `polars>=0.20.0`
-  - Dev dependencies: `pytest>=7.0`, `ruff`
-  - Build system: setuptools or hatchling
+```python
+@dataclass
+class ColumnSchema:
+    cast_to: Any  # pl.DataType (e.g., pl.Int64, pl.Float64)
+```
 
-- [ ] **0.3** Write `vizflow/__init__.py`
-  ```python
-  __version__ = "0.1.0"
-  ```
+### Config
 
-- [ ] **0.4** Write `README.md`
-  - Project description
-  - Installation instructions
-  - Basic usage example
+Central configuration for a pipeline run.
 
-- [ ] **0.5** Write `tests/test_import.py`
-  ```python
-  def test_import():
-      import vizflow as vf
-      assert vf.__version__ == "0.1.0"
-  ```
+```python
+@dataclass
+class Config:
+    # === Input Paths ===
+    alpha_dir: Path | None = None
+    alpha_pattern: str = "alpha_{date}.feather"
+    trade_dir: Path | None = None
+    trade_pattern: str = "trade_{date}.feather"
+    calendar_path: Path | None = None
 
-- [ ] **0.6** Run tests locally: `pytest tests/`
+    # === Output Paths (2 materialization points) ===
+    replay_dir: Path | None = None      # FIFO output (materialization 1)
+    aggregate_dir: Path | None = None   # Aggregation output (materialization 2)
 
-- [ ] **0.7** Build package: `python -m build`
+    # === Market ===
+    market: str = "CN"
 
-- [ ] **0.8** Upload to PyPI: `twine upload dist/*`
+    # === Column Mapping (per datasource) ===
+    alpha_columns: dict[str, str] = field(default_factory=dict)
+    trade_columns: dict[str, str] = field(default_factory=dict)
 
-- [ ] **0.9** Verify: `pip install vizflow && python -c "import vizflow"`
+    # === Schema Evolution ===
+    alpha_schema: dict[str, ColumnSchema] = field(default_factory=dict)
+    trade_schema: dict[str, ColumnSchema] = field(default_factory=dict)
+
+    # === Aggregation ===
+    binwidths: dict[str, float] = field(default_factory=dict)
+    group_by: list[str] = field(default_factory=list)
+
+    # === Analysis ===
+    horizons: list[int] = field(default_factory=list)
+    time_cutoff: int | None = None
+
+    # === Helpers ===
+    def col(self, semantic: str, source: str = "trade") -> str:
+        """Get actual column name from semantic name."""
+        if source == "alpha":
+            return self.alpha_columns.get(semantic, semantic)
+        return self.trade_columns.get(semantic, semantic)
+
+    def get_alpha_path(self, date: str) -> Path:
+        """Get alpha file path for a date."""
+
+    def get_trade_path(self, date: str) -> Path:
+        """Get trade file path for a date."""
+
+    def get_replay_path(self, date: str, suffix: str = ".parquet") -> Path:
+        """Get FIFO replay output path for a date."""
+
+    def get_aggregate_path(self, date: str, suffix: str = ".parquet") -> Path:
+        """Get aggregation output path for a date."""
+```
+
+### Context
+
+Runtime state passed to pipeline functions.
+
+```python
+@dataclass
+class Context:
+    config: Config
+    calendar: pl.DataFrame
+    market: Market
+    date: str
+
+    def col(self, semantic: str, source: str = "trade") -> str:
+        """Shortcut to config.col()."""
+        return self.config.col(semantic, source)
+```
+
+### Global Config
+
+```python
+def set_config(config: Config) -> None:
+    """Set the global config."""
+
+def get_config() -> Config:
+    """Get the global config. Raises RuntimeError if not set."""
+```
+
+### I/O Functions
+
+Load data with automatic schema evolution.
+
+```python
+def load_alpha(date: str, config: Config | None = None) -> pl.LazyFrame:
+    """Load alpha data with schema evolution applied."""
+
+def load_trade(date: str, config: Config | None = None) -> pl.LazyFrame:
+    """Load trade data with schema evolution applied."""
+
+def load_calendar(config: Config | None = None) -> pl.DataFrame:
+    """Load trading calendar."""
+```
+
+---
+
+## Market & Session
+
+### Session
+
+```python
+@dataclass
+class Session:
+    start: str  # "HH:MM"
+    end: str    # "HH:MM"
+```
+
+### Market
+
+```python
+@dataclass
+class Market:
+    name: str
+    sessions: list[Session]
+
+    def elapsed_seconds(self, time: datetime) -> int:
+        """Convert wall-clock time to continuous trading seconds."""
+```
+
+### Presets
+
+```python
+CN = Market(
+    name="CN",
+    sessions=[
+        Session(start="09:30", end="11:30"),  # Morning (2 hours)
+        Session(start="13:00", end="15:00"),  # Afternoon (2 hours)
+    ]
+)
+# Total: 4 hours = 14,400 seconds
+```
+
+### elapsed_seconds Calculation
+
+```
+Morning:   elapsed = (hour - 9) * 3600 + (minute - 30) * 60 + second
+Afternoon: elapsed = 7200 + (hour - 13) * 3600 + minute * 60 + second
+
+Example:
+  09:30:00 → 0
+  11:29:59 → 7199
+  13:00:00 → 7200
+  15:00:00 → 14400
+```
+
+---
+
+## Operations
+
+### parse_time
+
+Convert timestamp to elapsed_seconds.
+
+```python
+def parse_time(
+    df: pl.LazyFrame,
+    market: Market,
+    timestamp_col: str = "timestamp"
+) -> pl.LazyFrame:
+    """
+    Add elapsed_seconds column based on market sessions.
+
+    Args:
+        df: Input DataFrame
+        market: Market definition with sessions
+        timestamp_col: Name of timestamp column
+
+    Returns:
+        DataFrame with elapsed_seconds column added
+    """
+```
+
+### bin
+
+Discretize continuous values into bins.
+
+```python
+def bin(
+    df: pl.LazyFrame,
+    widths: dict[str, float]
+) -> pl.LazyFrame:
+    """
+    Add bin columns for specified columns.
+
+    Args:
+        df: Input DataFrame
+        widths: Column name to bin width mapping
+
+    Returns:
+        DataFrame with {col}_bin columns added
+
+    Formula:
+        bin_value = round(raw_value / binwidth)
+    """
+```
+
+### aggregate
+
+Group and aggregate data.
+
+```python
+def aggregate(
+    df: pl.LazyFrame,
+    group_by: list[str],
+    metrics: dict[str, pl.Expr]
+) -> pl.LazyFrame:
+    """
+    Aggregate data with custom metrics.
+
+    Args:
+        df: Input DataFrame
+        group_by: Columns to group by
+        metrics: Name to Polars expression mapping
+
+    Returns:
+        Aggregated DataFrame
+
+    Example:
+        metrics = {
+            "count": pl.len(),
+            "total_qty": pl.col("quantity").sum(),
+            "vwap": pl.col("notional").sum() / pl.col("quantity").sum(),
+        }
+    """
+```
+
+### forward_return
+
+Calculate forward returns at specified horizons.
+
+```python
+def forward_return(
+    df: pl.LazyFrame,
+    horizons: list[int],
+    price_col: str = "price",
+    time_col: str = "elapsed_seconds",
+    symbol_col: str = "symbol"
+) -> pl.LazyFrame:
+    """
+    Add forward return columns for each horizon.
+
+    Args:
+        df: Input DataFrame
+        horizons: List of horizon seconds [60, 300, 600]
+        price_col: Price column for return calculation
+        time_col: Time column for horizon lookup
+        symbol_col: Symbol column for grouping
+
+    Returns:
+        DataFrame with return_{h} columns added
+    """
+```
+
+---
+
+## Enrichment System
+
+### State
+
+Base class for user-defined state.
+
+```python
+class State:
+    """Per-symbol state that resets when symbol changes."""
+
+    def reset(self, symbol: str) -> None:
+        """Called when processing a new symbol."""
+        pass
+```
+
+### TagRule
+
+Base class for enrichment rules.
+
+```python
+class TagRule:
+    """Base class for enrichment rules."""
+
+    @property
+    def output_columns(self) -> list[str]:
+        """Column names this rule adds."""
+        raise NotImplementedError
+
+    def process(self, row: dict, state: State) -> dict | list[dict]:
+        """
+        Process a single row.
+
+        Returns:
+            dict: Single output row (column-adding)
+            list[dict]: Multiple output rows (row-expanding)
+        """
+        raise NotImplementedError
+```
+
+### Enricher
+
+Orchestrator that applies rules.
+
+```python
+class Enricher:
+    """Single-pass enrichment with pluggable rules."""
+
+    def __init__(
+        self,
+        rules: list[TagRule],
+        by: str = "symbol",           # Group by column
+        sort_by: str = "timestamp",   # Sort within group
+        state_class: type[State] | None = None
+    ):
+        self.rules = rules
+        self.by = by
+        self.sort_by = sort_by
+        self.state_class = state_class or State
+
+    def run(self, df: pl.LazyFrame) -> pl.LazyFrame:
+        """
+        Apply all rules in one pass.
+
+        Returns:
+            DataFrame with new columns added
+        """
+```
+
+### TagCondition
+
+Tag rows matching a condition.
+
+```python
+class TagCondition(TagRule):
+    """Add boolean column based on condition."""
+
+    def __init__(self, name: str, condition: Callable[[dict], bool]):
+        self.name = name
+        self.condition = condition
+
+    @property
+    def output_columns(self) -> list[str]:
+        return [self.name]
+
+    def process(self, row: dict, state: State) -> dict:
+        return {self.name: self.condition(row)}
+```
+
+### TagRunning
+
+Tag with running (cumulative) statistics.
+
+```python
+class TagRunning(TagRule):
+    """Add cumulative statistics column."""
+
+    def __init__(
+        self,
+        name: str,
+        update_fn: Callable[[Any, dict], Any],
+        initial: Any = 0
+    ):
+        self.name = name
+        self.update_fn = update_fn
+        self.initial = initial
+
+    @property
+    def output_columns(self) -> list[str]:
+        return [self.name]
+```
+
+### FIFOMatch
+
+FIFO trade matching with splitting.
+
+```python
+class FIFOMatch(TagRule):
+    """
+    FIFO entry/exit matching with trade splitting.
+
+    Row-expanding: One exit trade may split into multiple matched trades
+    if it closes multiple entries.
+    """
+
+    output_columns = ["matched_entry_id", "matched_qty", "holding_period", "is_closed"]
+
+    def __init__(
+        self,
+        side_col: str,
+        qty_col: str,
+        time_col: str,
+        price_col: str,
+        entry_side: str = "B",
+        exit_side: str = "S"
+    ):
+        self.side_col = side_col
+        self.qty_col = qty_col
+        self.time_col = time_col
+        self.price_col = price_col
+        self.entry_side = entry_side
+        self.exit_side = exit_side
+
+    def process(self, row: dict, state: FIFOState) -> list[dict]:
+        """
+        Process entry or exit trade.
+
+        Entry: Add to queue
+        Exit: Match against queue (FIFO), may return multiple rows
+        """
+```
+
+---
+
+## Execution
+
+### run
+
+Single date processing.
+
+```python
+def run(
+    pipeline_fn: Callable[[pl.LazyFrame, Context], pl.LazyFrame],
+    config: Config,
+    date: str,
+    save: bool = True
+) -> pl.DataFrame:
+    """Run pipeline for a single date."""
+```
+
+### run_batch
+
+Multiple dates, parallel processing.
+
+```python
+def run_batch(
+    pipeline_fn: Callable[[pl.LazyFrame, Context], pl.LazyFrame],
+    config: Config,
+    dates: list[str],
+    parallel: bool = True,
+    skip_existing: bool = True
+) -> None:
+    """Run pipeline for multiple dates in parallel."""
+```
+
+### run_cluster
+
+Generate cluster job commands.
+
+```python
+def run_cluster(
+    pipeline_fn: Callable[[pl.LazyFrame, Context], pl.LazyFrame],
+    config: Config,
+    dates: list[str]
+) -> list[str]:
+    """Generate cluster job commands for ailab."""
+```
+
+### Example Usage
+
+```python
+import vizflow as vf
+import polars as pl
+from pathlib import Path
+
+# === Configuration ===
+config = vf.Config(
+    # Input Paths
+    alpha_dir=Path("/data/alpha"),
+    trade_dir=Path("/data/trade"),
+    calendar_path=Path("/data/calendar.parquet"),
+    # Output Paths (2 materialization points)
+    replay_dir=Path("/data/replay"),         # FIFO output (materialization 1)
+    aggregate_dir=Path("/data/partials"),    # Aggregation output (materialization 2)
+    # Market
+    market="CN",
+    # Column Mapping
+    alpha_columns={"timestamp": "ticktime", "price": "mid", "symbol": "ukey"},
+    trade_columns={"timestamp": "fillTs", "price": "fillPrice", "symbol": "ukey"},
+    # Schema Evolution
+    trade_schema={"qty": vf.ColumnSchema(cast_to=pl.Int64)},  # 1.00000002 → 1
+    # Aggregation
+    binwidths={"alpha": 1e-4},
+    # Analysis
+    horizons=[60, 300],
+)
+vf.set_config(config)
+
+# === Load Data (with schema evolution) ===
+alpha = vf.load_alpha("20241001")  # LazyFrame
+trade = vf.load_trade("20241001")  # LazyFrame, qty cast to Int64
+calendar = vf.load_calendar()      # DataFrame
+
+# === Pipeline Function ===
+def process_day(df: pl.LazyFrame, ctx: vf.Context) -> pl.LazyFrame:
+    # Stage 1: Minimal enrichment
+    df = vf.parse_time(df, ctx.market, ctx.col("timestamp"))
+
+    # Stage 2: Replay (FIFO)
+    enricher = vf.Enricher(rules=[vf.FIFOMatch(...)])
+    df = enricher.run(df)
+
+    # Stage 3: Full enrichment
+    df = vf.forward_return(df, horizons=ctx.config.horizons)
+
+    # Stage 4: Aggregation
+    df = vf.bin(df, ctx.config.binwidths)
+    df = vf.aggregate(df, group_by=[...], metrics={...})
+
+    return df
+
+# === Run ===
+vf.run(process_day, config, date="20241001")
+vf.run_batch(process_day, config, dates=["20241001", "20241002", "20241003"])
+```
+
+---
+
+# Part 3: Implementation Phases
+
+## Phase 0: Scaffolding (v0.1.0)
+
+**Status:** COMPLETE
+
+- [x] Create directory structure
+- [x] Write `pyproject.toml`
+- [x] Write `vizflow/__init__.py`
+- [x] Write `README.md`
+- [x] Write `tests/test_import.py`
+- [x] Build and publish to PyPI
+
+---
+
+## Phase 1: Config + Market (v0.2.0)
+
+**Status:** COMPLETE
+
+- [x] Create `vizflow/config.py`
+  - Config dataclass with fields
+  - `col(semantic)` method
+
+- [x] Create `vizflow/market.py`
+  - Session dataclass
+  - Market dataclass
+  - CN preset
+
+- [x] Update `vizflow/__init__.py` exports
+- [x] Create tests
+- [x] Publish v0.2.0
+
+---
+
+## Phase 2: Core Operations (v0.3.0, v0.4.0)
+
+**Status:** COMPLETE
+
+### v0.3.0
+
+- [x] Add `parse_time()` to ops.py
+- [x] Add `bin()` to ops.py
+- [x] Add `aggregate()` to ops.py
+- [x] Create `tests/test_ops.py`
+- [x] Publish v0.3.0
+
+### v0.4.0
+
+- [x] Add `set_config()` and `get_config()` to config.py
+- [x] Refactor `parse_time()` to use global config
+- [x] Update tests for global config pattern
+- [x] Publish v0.4.0
+
+---
+
+## Phase 3: Enrichment + FIFO (v0.5.0)
+
+**Status:** NEXT
+
+> **Detailed plan:** See below for architecture, data flow, and implementation steps.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           USER INTERFACE                                 │
+│  result = calc_fifo(df)  # No column params - uses Config               │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         ORCHESTRATION LAYER                              │
+│                           calc_fifo()                                    │
+│  • Validates input columns via cfg.col()                                │
+│  • Collects LazyFrame (MATERIALIZATION 1)                               │
+│  • Coordinates pipeline stages                                           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+        ┌───────────────────────────┼───────────────────────────┐
+        ▼                           ▼                           ▼
+┌───────────────┐         ┌───────────────┐         ┌───────────────┐
+│  PREP STAGE   │         │ GROUPING STAGE│         │ MATCHING STAGE│
+│ _prep_trades()│   ───►  │ _assign_      │   ───►  │ _match_fifo() │
+│               │         │ position_     │         │               │
+│ • signed_qty  │         │ groups()      │         │ • FIFO queue  │
+│ • cumQty      │         │               │         │ • Trade split │
+│ • jump split  │         │ • cumQty=0    │         │ • Entry/Exit  │
+└───────────────┘         │   detection   │         │   tagging     │
+                          └───────────────┘         └───────────────┘
+```
+
+### Key Concepts
+
+**Position Lifecycle:**
+```
+cumQty = cumsum(signed_qty)  # per symbol
+Each cumQty=0 → end of position group, start new group
+```
+
+**Jump Row Handling (Position Reversal):**
+```
+cumQty=100, then Sell 150
+→ Split into: Sell 100 (closes group 1) + Sell 50 (opens group 2)
+Detection: abs(sign(cumQty).diff()) == 2
+```
+
+**Entry/Exit Tagging:**
+```
+entry_side = first trade's side in group
+trade_type = "Entry" if same side, "Exit" if opposite
+```
+
+### Output Schema
+
+| Column | Type | Description |
+|--------|------|-------------|
+| entry_idx | Int64 | Original index of Entry trade |
+| exit_idx | Int64 | Original index of Exit trade (None if unclosed) |
+| entry_time | Float64 | Time of Entry |
+| exit_time | Float64 | Time of Exit (None if unclosed) |
+| matched_qty | Int64 | Quantity matched |
+| holding_period | Float64 | exit_time - entry_time (inf if unclosed) |
+| close_markout | Float64 | Return from Entry to Exit |
+| is_closed | Boolean | Whether entry has been exited |
+| entry_side | String | "B" or "S" |
+| trade_type | String | "Entry" or "Exit" |
+
+### Implementation Steps
+
+**Step 0: Create docs/SCHEMA.md**
+- [x] Document standard log columns from production
+- [x] Document semantic → standard column mapping
+
+**Step 1: Scaffold vizflow/fifo.py**
+- [ ] Create file with section comments
+- [ ] Define `calc_fifo()` signature
+
+**Step 2: Prep Stage - _prep_trades()**
+- [ ] `_compute_signed_qty()`: qty * sign(side)
+- [ ] `_compute_cum_qty()`: cumsum per symbol
+- [ ] `_split_jump_rows()`: split position reversals
+
+**Step 3: Grouping Stage - _assign_position_groups()**
+- [ ] Detect `cumQty=0` boundaries
+- [ ] Assign unique group IDs per symbol
+
+**Step 4: Matching Stage - _match_fifo()**
+- [ ] `_fifo_match_group()`: Core FIFO algorithm
+  - Entry queue with FIFO order
+  - Exit matching with trade splitting
+  - Preserve both entry_idx and exit_idx
+- [ ] Handle unclosed: holding_period=inf
+
+**Step 5: Orchestration - calc_fifo()**
+- [ ] Use `get_config()` for column resolution
+- [ ] Pipeline: prep → group → match
+- [ ] Return as LazyFrame
+
+**Step 6: Exports and Tests**
+- [ ] Update `vizflow/__init__.py`
+- [ ] Create `tests/test_fifo.py`
+
+**Step 7: Publish v0.5.0**
+
+### Test Cases
+
+1. **cumQty:** Buy 100, Sell 100 → cumQty=[100, 0]
+2. **Jump split:** Buy 100, Sell 150 → splits into (Sell 100, Sell 50)
+3. **Position groups:** Multiple round-trips get different group IDs
+4. **Simple match:** Buy 100 @ t=0, Sell 100 @ t=10 → holding_period=10
+5. **Trade splitting:** Buy 50, Buy 50, Sell 80 → 2 output rows
+6. **Unclosed:** Buy 100, no exit → holding_period=inf, is_closed=False
+7. **exit_idx preserved:** Fixes pandas bug - both split rows have same exit_idx
+8. **Entry/Exit tagging:** entry_side="B" means Buy=Entry, Sell=Exit
+9. **Short selling:** First trade is Sell → entry_side="S"
+10. **Multi-symbol:** Symbols processed independently
 
 ### Exit Criteria
-- `pip install vizflow` works
-- `import vizflow as vf` works
-- `vf.__version__` returns "0.1.0"
+
+- [ ] `_compute_cum_qty()` correctly computes cumulative position
+- [ ] `_split_jump_rows()` splits position reversals correctly
+- [ ] `_assign_position_groups()` groups round-trips correctly
+- [ ] `_fifo_match_group()` matches FIFO and splits trades
+- [ ] **exit_idx preserved** for all matched rows
+- [ ] **entry_side** and **trade_type** columns correctly tag Entry vs Exit
+- [ ] Unclosed positions have `holding_period=inf`, `exit_idx=None`
+- [ ] Multi-symbol data handled correctly
+- [ ] All tests pass
 
 ---
 
-## Phase 1: Config + Market + I/O
+## Phase 4: Forward Returns (v0.6.0)
 
-**Goal**: Load data, compute elapsed_seconds, save results
+**Status:** TODO
 
-### Steps
-
-- [ ] **1.1** Create `vizflow/config.py`
-  - `Config` dataclass with fields:
-    - `input_dir: Path`
-    - `output_dir: Path`
-    - `input_pattern: str = "{date}.feather"`
-    - `market: str = "CN"`
-    - `columns: dict[str, str]` (semantic → actual mapping)
-  - `col(semantic)` method for column name lookup
-  - `get_file_path(date)` method
-
-- [ ] **1.2** Create `vizflow/market.py`
-  - `Session` dataclass: `start: str`, `end: str`
-  - `Market` dataclass: `name: str`, `sessions: list[Session]`
-  - `elapsed_seconds(time: datetime) -> int` method
-  - `CN` preset: sessions 09:30-11:30, 13:00-15:00
-  - `CRYPTO` preset: 24/7
-
-- [ ] **1.3** Create `vizflow/io.py`
-  - `load(path) -> pl.LazyFrame` - load feather/parquet
-  - `save(df, path)` - save to parquet
-  - `scan(pattern) -> pl.LazyFrame` - lazy scan glob pattern
-
-- [ ] **1.4** Update `vizflow/__init__.py`
-  ```python
-  from .config import Config
-  from .market import Market, Session, CN, CRYPTO
-  from .io import load, save, scan
-  ```
-
-- [ ] **1.5** Create `tests/test_config.py`
-  - Test column mapping
-  - Test file path generation
-
-- [ ] **1.6** Create `tests/test_market.py`
-  - Test CN elapsed_seconds at key times (09:30, 11:30, 13:00, 15:00)
-  - Test CRYPTO (24h)
-
-- [ ] **1.7** Create `tests/test_io.py`
-  - Test load/save roundtrip with tmp_path
-  - Test scan glob pattern
-
-- [ ] **1.8** Run all tests: `pytest tests/`
-
-- [ ] **1.9** Update version to 0.2.0, publish to PyPI
-
-### Exit Criteria
-- `Config(columns={"price": "mid"}).col("price")` returns `"mid"`
-- `CN.elapsed_seconds(datetime(2024,1,1,9,30,0))` returns `0`
-- `CN.elapsed_seconds(datetime(2024,1,1,13,0,0))` returns `7200`
-- Load/save roundtrip preserves data
-- All tests pass
-
----
-
-## Phase 2: Core Operations
-
-**Goal**: Run simple aggregation pipeline
-
-### Steps
-
-- [ ] **2.1** Create `vizflow/ops.py` with `parse_time()`
-  - Input: `df: LazyFrame`, `market: Market`, `timestamp_col: str`
-  - Output: df with `elapsed_seconds` column added
-  - Use `pl.Expr` to compute from timestamp
-
-- [ ] **2.2** Add `bin()` to `vizflow/ops.py`
-  - Input: `df: LazyFrame`, `widths: dict[str, float]`
-  - Output: df with `{col}_bin` columns added
-  - Formula: `round(value / width)` as integer
-
-- [ ] **2.3** Add `aggregate()` to `vizflow/ops.py`
-  - Input: `df: LazyFrame`, `group_by: list[str]`, `metrics: dict[str, pl.Expr]`
-  - Output: aggregated LazyFrame
-  - Apply `.group_by().agg()` with named expressions
-
-- [ ] **2.4** Update `vizflow/__init__.py`
-  ```python
-  from .ops import parse_time, bin, aggregate
-  ```
-
-- [ ] **2.5** Create `tests/test_ops.py`
-  - Test parse_time adds correct elapsed_seconds
-  - Test bin creates correct bin values
-  - Test aggregate computes correct metrics
-
-- [ ] **2.6** Run all tests: `pytest tests/`
-
-- [ ] **2.7** Update version to 0.3.0, publish to PyPI
-
-### Exit Criteria
-- `parse_time(df, CN, "ticktime")` adds `elapsed_seconds` column
-- `bin(df, {"alpha": 1e-4})` adds `alpha_bin` column
-- `aggregate(df, ["group"], {"count": pl.len()})` groups correctly
-- All tests pass
-
----
-
-## Phase 3: Forward Returns + Calendar
-
-**Goal**: Compute forward returns, manage trading calendar
-
-### Steps
-
-- [ ] **3.1** Add `forward_return()` to `vizflow/ops.py`
-  - Input: `df`, `horizons: list[int]`, `price_col`, `time_col`, `symbol_col`
-  - Output: df with `return_{h}` columns for each horizon
-  - Logic: For each row, find future price at `time + horizon`, compute `(future - current) / current`
+- [ ] Add `forward_return()` to `vizflow/ops.py`
+  - Input: `df`, `horizons`, `price_col`, `time_col`, `symbol_col`
+  - Output: df with `return_{h}` columns
   - Handle edge case: no future price → null
 
-- [ ] **3.2** Create `vizflow/calendar.py`
-  - `load(path) -> pl.DataFrame` - load calendar CSV/parquet
-  - `generate(dates: list[str]) -> pl.DataFrame` - create calendar with prev/next
-  - `range(calendar, start, end) -> list[str]` - get trading days in range
+- [ ] Create `vizflow/calendar.py`
+  - `load(path) -> pl.DataFrame`
+  - `generate(dates) -> pl.DataFrame` with prev/next columns
 
-- [ ] **3.3** Update `vizflow/__init__.py`
-  ```python
-  from .ops import forward_return
-  from . import calendar
-  ```
-
-- [ ] **3.4** Create `tests/test_forward_return.py`
-  - Test forward return calculation
-  - Test null when no future price
-  - Test multiple horizons
-
-- [ ] **3.5** Create `tests/test_calendar.py`
-  - Test load/generate
-  - Test range filtering
-
-- [ ] **3.6** Run all tests: `pytest tests/`
-
-- [ ] **3.7** Update version to 0.4.0, publish to PyPI
-
-### Exit Criteria
-- `forward_return(df, [60], "mid", "elapsed_seconds", "symbol")` computes returns
-- `calendar.range(cal, "20240101", "20240105")` returns trading days
-- All tests pass
+- [ ] Update `__init__.py` exports
+- [ ] Create `tests/test_forward_return.py`
+- [ ] Create `tests/test_calendar.py`
+- [ ] Publish v0.6.0
 
 ---
 
-## Phase 4: Execution
+## Phase 5: Execution (v0.7.0)
 
-**Goal**: Production-ready pipeline execution
+**Status:** TODO
 
-### Steps
-
-- [ ] **4.1** Create `vizflow/context.py`
-  - `Context` dataclass: `config`, `calendar`, `market`, `date`
+- [ ] Create `vizflow/context.py`
+  - Context dataclass: config, calendar, market, date
   - `col(semantic)` shortcut method
 
-- [ ] **4.2** Create `vizflow/run.py` with `run()`
-  - Input: `pipeline_fn`, `config`, `date`, `save=True`
-  - Logic:
-    1. Load input file for date
-    2. Create Context
-    3. Call pipeline_fn(df, ctx)
-    4. Save result if save=True
-  - Return: collected DataFrame
+- [ ] Add `run()` to `vizflow/run.py`
+  - Single date processing
+  - Load → Pipeline → Save
 
-- [ ] **4.3** Add `run_batch()` to `vizflow/run.py`
-  - Input: `pipeline_fn`, `config`, `dates`, `parallel=True`, `skip_existing=True`
-  - Logic:
-    - If parallel: use multiprocessing Pool
-    - If skip_existing: check output file exists
-  - Return: None (saves to files)
+- [ ] Add `run_batch()` to `vizflow/run.py`
+  - Multiple dates, parallel processing
+  - `skip_existing` option
 
-- [ ] **4.4** Add `run_local()` to `vizflow/run.py`
-  - Same as run_batch but always sequential
-  - For debugging/testing without cluster
+- [ ] Add `run_cluster()` to `vizflow/run.py`
+  - Generate ailab job commands
 
-- [ ] **4.5** Add `run_cluster()` to `vizflow/run.py`
-  - Input: `pipeline_fn`, `config`, `dates`
-  - Output: list of ailab job commands
-  - Format: `ailab create job --name=vf_{date} ...`
-
-- [ ] **4.6** Update `vizflow/__init__.py`
-  ```python
-  from .context import Context
-  from .run import run, run_batch, run_local, run_cluster
-  ```
-
-- [ ] **4.7** Create `tests/test_run.py`
-  - Test run() single date with tmp_path
-  - Test run_batch() multiple dates
-  - Test skip_existing behavior
-  - Test run_local()
-
-- [ ] **4.8** Run all tests: `pytest tests/`
-
-- [ ] **4.9** Update version to 0.5.0, publish to PyPI
-
-### Exit Criteria
-- `run(pipeline, config, "20241001")` processes single date
-- `run_batch(pipeline, config, dates, parallel=True)` processes in parallel
-- `run_local(pipeline, config, dates)` processes sequentially
-- `skip_existing` works correctly
-- All tests pass
+- [ ] Update `__init__.py` exports
+- [ ] Create `tests/test_run.py`
+- [ ] Publish v0.7.0
 
 ---
 
-## Phase 5: Enrichment Framework
+## Phase 6: Visualization (v0.8.0)
 
-**Goal**: Add tags to data in single pass (without FIFO)
+**Status:** FUTURE (optional)
 
-### Steps
-
-- [ ] **5.1** Create `vizflow/enrichment.py` with base classes
-  - `State` class with `reset(symbol)` method
-  - `TagRule` class with `output_columns` property and `process(row, state)` method
-
-- [ ] **5.2** Add `TagCondition` rule
-  - Input: `name: str`, `condition: Callable[[dict], bool]`
-  - Output: single boolean column
-  - process(): return `{name: condition(row)}`
-
-- [ ] **5.3** Add `TagRunning` rule
-  - Input: `name: str`, `update_fn: Callable`, `initial: Any`
-  - Output: single column with running value
-  - process(): update state, return `{name: new_value}`
-
-- [ ] **5.4** Add `Enricher` class
-  - Input: `rules`, `by`, `sort_by`, `state_class`
-  - `run(df)` method:
-    1. Collect df
-    2. Group by `by` column
-    3. Sort each group by `sort_by`
-    4. For each group: reset state, process rows, collect outputs
-    5. Return df with new columns
-
-- [ ] **5.5** Update `vizflow/__init__.py`
-  ```python
-  from .enrichment import State, TagRule, Enricher, TagCondition, TagRunning
-  ```
-
-- [ ] **5.6** Create `tests/test_enrichment.py`
-  - Test TagCondition adds boolean column
-  - Test TagRunning accumulates values
-  - Test state resets per symbol
-  - Test multiple rules in one pass
-
-- [ ] **5.7** Run all tests: `pytest tests/`
-
-- [ ] **5.8** Update version to 0.6.0, publish to PyPI
-
-### Exit Criteria
-- `TagCondition("is_large", lambda r: r["qty"] > 10000)` works
-- `TagRunning("seq", lambda p, r: p + 1, 0)` increments per row
-- State resets when symbol changes
-- All tests pass
-
----
-
-## Phase 6: FIFO Matching
-
-**Goal**: Trade matching with splitting
-
-### Steps
-
-- [ ] **6.1** Add `FIFOMatch` rule to `vizflow/enrichment.py`
-  - Input: `side_col`, `qty_col`, `time_col`, `price_col`, `entry_side`, `exit_side`
-  - Output columns: `matched_entry_idx`, `matched_qty`, `holding_period`, `is_closed`
-  - Row-expanding: returns list of dicts when one exit matches multiple entries
-
-- [ ] **6.2** Update `Enricher.run()` to handle row-expanding rules
-  - Detect if rule returns list vs dict
-  - If list: expand into multiple output rows
-  - Preserve original row columns when expanding
-
-- [ ] **6.3** Create `tests/test_fifo.py`
-  - Test simple match (buy 100, sell 100)
-  - Test partial match (buy 100, sell 60, sell 40)
-  - Test trade splitting (buy 50, buy 50, sell 80 → 2 rows)
-  - Test unclosed trades
-  - Test columns preserved when splitting
-
-- [ ] **6.4** Run all tests: `pytest tests/`
-
-- [ ] **6.5** Update version to 0.7.0, publish to PyPI
-
-### Exit Criteria
-- Simple FIFO match works
-- Trade splitting produces multiple rows
-- Original columns preserved
-- Unclosed trades tagged correctly
-- All tests pass
-
----
-
-## Phase 7: Visualization (Future)
-
-**Goal**: Interactive Dash dashboards
-
-### Steps
-
-- [ ] **7.1** Create `vizflow/viz.py`
+- [ ] Create `vizflow/viz.py`
   - `heatmap(df, x, y, z)` → Plotly figure
   - `line(df, x, y, group)` → Plotly figure
   - `dashboard(panels)` → Dash app
 
-- [ ] **7.2** Add optional dependency: `dash`, `plotly`
-
-- [ ] **7.3** Create tests
-
-- [ ] **7.4** Update version to 0.8.0, publish to PyPI
-
-*Defer to later - focus on data processing first.*
+- [ ] Add optional dependencies: `dash`, `plotly`
+- [ ] Create tests
+- [ ] Publish v0.8.0
 
 ---
 
-## Quick Reference: File Structure
+# Part 4: Release Process
+
+## Versioning
+
+### Pre-1.0 (Current)
+
+**Format:** `0.MINOR.PATCH`
+
+- **0.MINOR.0** - New features (new modules, new public APIs)
+- **0.MINOR.PATCH** - Bug fixes, refactors, internal improvements
+
+**Breaking changes:** Allowed in any 0.MINOR release (document in changelog)
+
+### Post-1.0 (Future)
+
+**Format:** `MAJOR.MINOR.PATCH`
+
+- **MAJOR** - Breaking changes
+- **MINOR** - New features (backward compatible)
+- **PATCH** - Bug fixes
+
+## Release Checklist
+
+### Feature Release (0.MINOR.0)
+
+- [ ] All tests pass (`pytest tests/`)
+- [ ] Update `__version__` in `__init__.py`
+- [ ] Update `version` in `pyproject.toml`
+- [ ] Update CHANGELOG.md
+- [ ] Build: `python -m build`
+- [ ] Test locally: `pip install dist/*.whl`
+- [ ] **ASK USER**: "Ready to publish v0.X.0 to PyPI?"
+- [ ] Upload: `twine upload dist/*.whl` (wheel ONLY, NOT .tar.gz!)
+- [ ] Git tag: `git tag v0.X.0 && git push origin v0.X.0`
+- [ ] Update demo.ipynb if needed
+
+### Patch Release (0.MINOR.PATCH)
+
+Same as above, but:
+- [ ] Verify no new features
+- [ ] Verify no breaking changes
+
+---
+
+## Package Structure
 
 ```
 vizflow/
 ├── __init__.py      # Public API exports
 ├── py.typed         # PEP 561 marker
-├── config.py        # Config dataclass
-├── context.py       # Context dataclass
-├── market.py        # Market, Session, CN, CRYPTO
-├── calendar.py      # Calendar utilities
-├── io.py            # load, save, scan
+├── config.py        # Config, set_config, get_config
+├── market.py        # Market, Session, CN
 ├── ops.py           # parse_time, bin, aggregate, forward_return
-├── enrichment.py    # State, TagRule, Enricher, TagCondition, TagRunning, FIFOMatch
-├── run.py           # run, run_batch, run_local, run_cluster
-└── viz.py           # (future) visualization
+├── enrichment.py    # State, TagRule, Enricher, FIFOMatch
+├── calendar.py      # Calendar utilities
+├── context.py       # Context for pipeline runs
+├── run.py           # run, run_batch, run_cluster
+└── viz.py           # Visualization (future)
 
 tests/
-├── __init__.py
 ├── test_import.py
 ├── test_config.py
 ├── test_market.py
-├── test_io.py
 ├── test_ops.py
+├── test_enrichment.py
+├── test_fifo.py
 ├── test_forward_return.py
 ├── test_calendar.py
-├── test_run.py
-├── test_enrichment.py
-└── test_fifo.py
+└── test_run.py
 ```
 
 ---
 
-## Future Considerations (Deferred from DDIA Review)
+## Version 1.0.0 Criteria
 
-### Fault Tolerance & Error Handling
-- Detailed failure modes and recovery strategies
-- Checkpointing and retry logic
-- Error handling patterns
-- Related to schema validation (see DESIGN.md Section 14)
+### Functional Requirements
 
-### Performance Characteristics
-- Storage format benchmarks (Parquet vs Feather)
-- Memory usage estimation formulas
-- Bottleneck identification and optimization checklist
-- Cluster sizing guidelines
+- [ ] Config, Market, parse_time, bin, aggregate
+- [ ] Enrichment + FIFO
+- [ ] forward_return + calendar
+- [ ] Execution (run, run_batch, run_cluster)
+- [ ] Visualization (optional, can be 1.1.0)
 
-### Testing Strategy
-- Testing pyramid (unit/integration/E2E)
-- Property-based testing for FIFO invariants
-- Smoke tests on production data
-- Strategies for testing TB-scale pipelines locally
+### Quality Requirements
 
-*These topics are documented for future reference but not prioritized for current implementation phases.*
+- [ ] Test coverage >90% on core modules
+- [ ] API reference complete
+- [ ] User guide with examples
+- [ ] TB-scale validated on ailab
+
+### API Stability
+
+- [ ] No breaking changes planned for 6 months
+- [ ] Deprecation policy defined

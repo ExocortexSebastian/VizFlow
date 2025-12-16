@@ -2,52 +2,138 @@
 
 from pathlib import Path
 
-from vizflow import Config
+import polars as pl
+import pytest
+
+from vizflow import ColumnSchema, Config
 
 
-def test_config_col_mapping():
-    """Test column name mapping."""
+def test_config_col_mapping_trade():
+    """Test column name mapping for trade data."""
     config = Config(
-        input_dir=Path("/data"),
-        output_dir=Path("/output"),
-        columns={"timestamp": "ticktime", "price": "mid", "symbol": "ukey"},
+        trade_columns={"timestamp": "fillTs", "price": "fillPrice", "symbol": "ukey"},
     )
-    assert config.col("timestamp") == "ticktime"
-    assert config.col("price") == "mid"
+    assert config.col("timestamp") == "fillTs"
+    assert config.col("timestamp", source="trade") == "fillTs"
+    assert config.col("price") == "fillPrice"
     assert config.col("symbol") == "ukey"
     # Fallback to semantic name if not mapped
     assert config.col("unknown") == "unknown"
 
 
-def test_config_path_generation():
-    """Test input/output path generation."""
+def test_config_col_mapping_alpha():
+    """Test column name mapping for alpha data."""
     config = Config(
-        input_dir=Path("/data/trades"),
-        output_dir=Path("/data/output"),
-        input_pattern="trades_{date}.feather",
+        alpha_columns={"timestamp": "ticktime", "price": "mid", "symbol": "ukey"},
     )
-    assert config.get_input_path("20241001") == Path("/data/trades/trades_20241001.feather")
-    assert config.get_output_path("20241001") == Path("/data/output/20241001.parquet")
+    assert config.col("timestamp", source="alpha") == "ticktime"
+    assert config.col("price", source="alpha") == "mid"
+    assert config.col("symbol", source="alpha") == "ukey"
+    # Fallback to semantic name if not mapped
+    assert config.col("unknown", source="alpha") == "unknown"
+
+
+def test_config_path_generation_alpha():
+    """Test alpha path generation."""
+    config = Config(
+        alpha_dir=Path("/data/alpha"),
+        alpha_pattern="alpha_{date}.feather",
+    )
+    assert config.get_alpha_path("20241001") == Path("/data/alpha/alpha_20241001.feather")
+
+
+def test_config_path_generation_trade():
+    """Test trade path generation."""
+    config = Config(
+        trade_dir=Path("/data/trade"),
+        trade_pattern="trade_{date}.feather",
+    )
+    assert config.get_trade_path("20241001") == Path("/data/trade/trade_20241001.feather")
+
+
+def test_config_path_generation_replay():
+    """Test replay output path generation."""
+    config = Config(
+        replay_dir=Path("/data/replay"),
+    )
+    assert config.get_replay_path("20241001") == Path("/data/replay/20241001.parquet")
+
+
+def test_config_path_generation_aggregate():
+    """Test aggregate output path generation."""
+    config = Config(
+        aggregate_dir=Path("/data/partials"),
+    )
+    assert config.get_aggregate_path("20241001") == Path("/data/partials/20241001.parquet")
+
+
+def test_config_path_not_set():
+    """Test error when path not set."""
+    config = Config()
+
+    with pytest.raises(ValueError, match="alpha_dir is not set"):
+        config.get_alpha_path("20241001")
+
+    with pytest.raises(ValueError, match="trade_dir is not set"):
+        config.get_trade_path("20241001")
+
+    with pytest.raises(ValueError, match="replay_dir is not set"):
+        config.get_replay_path("20241001")
+
+    with pytest.raises(ValueError, match="aggregate_dir is not set"):
+        config.get_aggregate_path("20241001")
 
 
 def test_config_string_paths():
     """Test that string paths are converted to Path objects."""
     config = Config(
-        input_dir="/data/trades",
-        output_dir="/data/output",
+        alpha_dir="/data/alpha",
+        trade_dir="/data/trade",
+        calendar_path="/data/calendar.parquet",
+        replay_dir="/data/replay",
+        aggregate_dir="/data/partials",
     )
-    assert isinstance(config.input_dir, Path)
-    assert isinstance(config.output_dir, Path)
+    assert isinstance(config.alpha_dir, Path)
+    assert isinstance(config.trade_dir, Path)
+    assert isinstance(config.calendar_path, Path)
+    assert isinstance(config.replay_dir, Path)
+    assert isinstance(config.aggregate_dir, Path)
 
 
 def test_config_defaults():
     """Test default values."""
-    config = Config(
-        input_dir=Path("/data"),
-        output_dir=Path("/output"),
-    )
-    assert config.input_pattern == "{date}.feather"
+    config = Config()
+
+    assert config.alpha_dir is None
+    assert config.trade_dir is None
+    assert config.calendar_path is None
+    assert config.replay_dir is None
+    assert config.aggregate_dir is None
+    assert config.alpha_pattern == "alpha_{date}.feather"
+    assert config.trade_pattern == "trade_{date}.feather"
     assert config.market == "CN"
-    assert config.columns == {}
+    assert config.alpha_columns == {}
+    assert config.trade_columns == {}
+    assert config.alpha_schema == {}
+    assert config.trade_schema == {}
     assert config.binwidths == {}
     assert config.horizons == []
+
+
+def test_column_schema():
+    """Test ColumnSchema dataclass."""
+    schema = ColumnSchema(cast_to=pl.Int64)
+    assert schema.cast_to == pl.Int64
+
+
+def test_config_with_schema():
+    """Test Config with schema evolution."""
+    config = Config(
+        trade_schema={
+            "qty": ColumnSchema(cast_to=pl.Int64),
+            "price": ColumnSchema(cast_to=pl.Float64),
+        },
+    )
+    assert "qty" in config.trade_schema
+    assert config.trade_schema["qty"].cast_to == pl.Int64
+    assert config.trade_schema["price"].cast_to == pl.Float64

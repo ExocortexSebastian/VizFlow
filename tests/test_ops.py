@@ -12,7 +12,7 @@ class TestParseTime:
     @pytest.fixture(autouse=True)
     def setup_config(self):
         """Set up global config before each test."""
-        config = Config(market="CN", input_dir=".", output_dir=".")
+        config = Config(market="CN")
         set_config(config)
 
     def test_morning_open(self):
@@ -115,7 +115,7 @@ class TestParseTime:
 
     def test_unsupported_market(self):
         """Non-CN market raises NotImplementedError."""
-        config = Config(market="CRYPTO", input_dir=".", output_dir=".")
+        config = Config(market="CRYPTO")
         set_config(config)
 
         df = pl.DataFrame({"ts": [93000000]}).lazy()

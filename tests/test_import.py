@@ -12,5 +12,5 @@ def test_version():
     """Test version is set correctly."""
     import vizflow as vf
 
-    assert vf.__version__ == "0.4.0"
+    assert vf.__version__ == "0.4.1"
     assert isinstance(vf.__version__, str)
