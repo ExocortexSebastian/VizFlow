@@ -1,7 +1,7 @@
 """Column mapping presets for VizFlow."""
 
-# Yuanzhao's log format -> VizFlow standard
-YUANZHAO = {
+# ylin's trade format (v2025-12-04)
+YLIN_V20251204 = {
     # Order columns (18)
     "symbol": "ukey",
     "orderId": "order_id",
@@ -59,9 +59,6 @@ YUANZHAO = {
     "globalCumSellNotional": "cum_sell_filled_notional",
 }
 
-# Alias: ylin (Yuanzhao's username)
-YLIN = YUANZHAO
-
 # jyao's alpha format (v2025-11-14)
 JYAO_V20251114 = {
     # Quote columns
@@ -81,4 +78,10 @@ JYAO_V20251114 = {
     "x60s": "alpha_60s",
     "alpha1": "alpha_3m",
     "alpha2": "alpha_30m",
+}
+
+# Preset registry for dynamic lookup
+PRESETS: dict[str, dict[str, str]] = {
+    "ylin_v20251204": YLIN_V20251204,
+    "jyao_v20251114": JYAO_V20251114,
 }

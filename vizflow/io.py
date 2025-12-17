@@ -141,7 +141,7 @@ def scan_trade(date: str, config: Config | None = None) -> pl.LazyFrame:
         >>> config = vf.Config(
         ...     trade_dir=Path("/data/yuanzhao/"),
         ...     trade_pattern="{date}.meords",
-        ...     column_preset="ylin",
+        ...     trade_preset="ylin_v20251204",
         ... )
         >>> vf.set_config(config)
         >>> df = vf.scan_trade("20241001")
@@ -168,7 +168,7 @@ def scan_trades(config: Config | None = None) -> pl.LazyFrame:
         >>> config = vf.Config(
         ...     trade_dir=Path("/data/yuanzhao/"),
         ...     trade_pattern="{date}.feather",
-        ...     column_preset="ylin",
+        ...     trade_preset="ylin_v20251204",
         ... )
         >>> vf.set_config(config)
         >>> df = vf.scan_trades()
@@ -190,7 +190,7 @@ def scan_trades(config: Config | None = None) -> pl.LazyFrame:
 
 def _apply_trade_mapping(df: pl.LazyFrame, config: Config) -> pl.LazyFrame:
     """Apply column rename + schema evolution for trade data."""
-    df = _apply_rename(df, config)
+    df = _apply_rename(df, config.trade_preset)
     for col_name, schema in config.trade_schema.items():
         df = df.with_columns(pl.col(col_name).cast(schema.cast_to))
     return df
@@ -198,22 +198,27 @@ def _apply_trade_mapping(df: pl.LazyFrame, config: Config) -> pl.LazyFrame:
 
 def _apply_alpha_mapping(df: pl.LazyFrame, config: Config) -> pl.LazyFrame:
     """Apply column rename + schema evolution for alpha data."""
-    df = _apply_rename(df, config)
+    df = _apply_rename(df, config.alpha_preset)
     for col_name, schema in config.alpha_schema.items():
         df = df.with_columns(pl.col(col_name).cast(schema.cast_to))
     return df
 
 
-def _apply_rename(df: pl.LazyFrame, config: Config) -> pl.LazyFrame:
-    """Apply column rename from preset or custom mapping."""
+def _apply_rename(df: pl.LazyFrame, preset: str | None) -> pl.LazyFrame:
+    """Apply column rename from preset name.
+
+    Args:
+        df: LazyFrame to rename columns
+        preset: Preset name (e.g., "ylin", "jyao_v20251114") or None
+    """
     # Drop record type prefix column if present (from CSV files)
     existing = set(df.collect_schema().names())
     if "#HFTORD" in existing:
         df = df.drop("#HFTORD")
         existing.remove("#HFTORD")
 
-    # Get rename map from preset or custom
-    rename_map = _get_rename_map(config)
+    # Get rename map from preset
+    rename_map = _get_rename_map(preset)
 
     if rename_map:
         existing = set(df.collect_schema().names())
@@ -238,7 +243,7 @@ def scan_alpha(date: str, config: Config | None = None) -> pl.LazyFrame:
         >>> config = vf.Config(
         ...     alpha_dir=Path("/data/jyao/alpha"),
         ...     alpha_pattern="alpha_{date}.feather",
-        ...     column_preset="jyao_v20251114",
+        ...     alpha_preset="jyao_v20251114",
         ... )
         >>> vf.set_config(config)
         >>> df = vf.scan_alpha("20251114")
@@ -275,23 +280,17 @@ def scan_alphas(config: Config | None = None) -> pl.LazyFrame:
     return _apply_alpha_mapping(df, config)
 
 
-def _get_rename_map(config: Config) -> dict[str, str]:
-    """Get rename map from preset name or custom dict.
+def _get_rename_map(preset: str | None) -> dict[str, str]:
+    """Get rename map from preset name.
 
     Args:
-        config: Config with column_preset or column_rename
+        preset: Preset name (e.g., "ylin_v20251204", "jyao_v20251114") or None
 
     Returns:
         Dict mapping old column names to new names
     """
-    if config.column_rename:
-        return config.column_rename
-    if config.column_preset:
-        from .presets import JYAO_V20251114, YLIN
+    if not preset:
+        return {}
+    from .presets import PRESETS
 
-        presets = {
-            "ylin": YLIN,
-            "jyao_v20251114": JYAO_V20251114,
-        }
-        return presets.get(config.column_preset.lower(), {})
-    return {}
+    return PRESETS.get(preset.lower(), {})

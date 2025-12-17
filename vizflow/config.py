@@ -70,9 +70,9 @@ class Config:
     alpha_schema: dict[str, ColumnSchema] = field(default_factory=dict)
     trade_schema: dict[str, ColumnSchema] = field(default_factory=dict)
 
-    # === Column Mapping ===
-    column_preset: str | None = None  # "ylin" or None
-    column_rename: dict[str, str] = field(default_factory=dict)  # Custom rename map
+    # === Column Mapping Presets ===
+    trade_preset: str | None = None  # "ylin" or None
+    alpha_preset: str | None = None  # "jyao_v20251114" or None
 
     # === Aggregation ===
     binwidths: dict[str, float] = field(default_factory=dict)
