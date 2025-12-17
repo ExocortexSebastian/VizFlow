@@ -196,13 +196,13 @@ trade_schema={"qty": ColumnSchema(cast_to=pl.Int64)}
 
 ### 4.6 Column Naming Conventions
 
-**Alpha vs Forward Return:**
-- `alpha_*` = Ŷ (predictions of forward returns)
-- `fret_*` = Y (actual forward returns)
+**Predictor vs Target:**
+- `x_*` = alpha / predictions
+- `y_*` = forward returns / targets
 
 **Time suffix rule:**
-- ≤60s → use seconds: `alpha_10s`, `alpha_60s`
-- >60s → use minutes: `alpha_3m`, `alpha_30m`
+- ≤60s → use seconds: `x_10s`, `x_60s`
+- >60s → use minutes: `x_3m`, `x_30m`
 
 **Standard column names:**
 
@@ -212,9 +212,9 @@ trade_schema={"qty": ColumnSchema(cast_to=pl.Int64)}
 | Quote | `bid_px0`, `ask_px0` | Best bid/ask price |
 | Quote | `bid_size0`, `ask_size0` | Best bid/ask size |
 | Time | `timestamp`, `ticktime` | Event timestamp |
-| Alpha | `alpha_10s`, `alpha_60s` | Predictions (≤60s) |
-| Alpha | `alpha_3m`, `alpha_30m` | Predictions (>60s) |
-| Return | `fret_60s`, `fret_3m` | Actual forward returns |
+| Predictor | `x_10s`, `x_60s` | Alpha predictions (≤60s) |
+| Predictor | `x_3m`, `x_30m` | Alpha predictions (>60s) |
+| Target | `y_60s`, `y_3m` | Forward returns |
 
 ### 4.7 Market Sessions
 

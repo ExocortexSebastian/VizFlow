@@ -37,9 +37,9 @@ print(vf.__version__)
 
 | Type | Naming | Examples |
 |------|--------|----------|
-| Alpha (predictions) | `alpha_*` | `alpha_10s`, `alpha_60s`, `alpha_3m` |
-| Forward return | `fret_*` | `fret_60s`, `fret_3m` |
-| Time suffix | ≤60s: `s`, >60s: `m` | `alpha_60s`, `alpha_3m` |
+| Predictor (X) | `x_*` | `x_10s`, `x_60s`, `x_3m` |
+| Target (Y) | `y_*` | `y_60s`, `y_3m` |
+| Time suffix | ≤60s: `s`, >60s: `m` | `x_60s`, `x_3m` |
 
 ## Example
 
@@ -58,7 +58,7 @@ vf.set_config(config)
 
 # Scan with automatic column mapping
 df = vf.scan_alpha("20251114")
-# Columns: alpha_10s, alpha_60s, alpha_3m, alpha_30m, bid_px0, ask_px0, ...
+# Columns: x_10s, x_60s, x_3m, x_30m, bid_px0, ask_px0, ...
 ```
 
 ## Planned Features

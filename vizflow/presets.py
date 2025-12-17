@@ -72,12 +72,12 @@ JYAO_V20251114 = {
     "DataDate": "data_date",
     # Volume
     "Volume": "volume",
-    # Alpha columns (Ŷ - predictions)
+    # Predictor columns (x_* = alpha predictions)
     # Rule: ≤60s → s, >60s → m
-    "x10s": "alpha_10s",
-    "x60s": "alpha_60s",
-    "alpha1": "alpha_3m",
-    "alpha2": "alpha_30m",
+    "x10s": "x_10s",
+    "x60s": "x_60s",
+    "alpha1": "x_3m",
+    "alpha2": "x_30m",
 }
 
 # Preset registry for dynamic lookup

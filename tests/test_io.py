@@ -6,38 +6,38 @@ import polars as pl
 import pytest
 
 import vizflow as vf
-from vizflow.presets import YLIN
+from vizflow.presets import YLIN_V20251204 as TRADE_PRESET
 
 
-class TestYlinPreset:
-    """Test YLIN preset contains expected mappings."""
+class TestTradePreset:
+    """Test trade preset contains expected mappings."""
 
-    def test_ylin_has_order_columns(self):
-        """Test YLIN maps order columns."""
-        assert YLIN["symbol"] == "ukey"
-        assert YLIN["orderId"] == "order_id"
-        assert YLIN["orderSide"] == "order_side"
-        assert YLIN["orderQty"] == "order_qty"
-        assert YLIN["fillPrice"] == "fill_price"
+    def test_trade_preset_has_order_columns(self):
+        """Test trade preset maps order columns."""
+        assert TRADE_PRESET["symbol"] == "ukey"
+        assert TRADE_PRESET["orderId"] == "order_id"
+        assert TRADE_PRESET["orderSide"] == "order_side"
+        assert TRADE_PRESET["orderQty"] == "order_qty"
+        assert TRADE_PRESET["fillPrice"] == "fill_price"
 
-    def test_ylin_has_quote_columns(self):
-        """Test YLIN maps quote/TOB columns."""
-        assert YLIN["bid"] == "bid_px0"
-        assert YLIN["ask"] == "ask_px0"
-        assert YLIN["bsize"] == "bid_size0"
-        assert YLIN["asize"] == "ask_size0"
-        assert YLIN["quoteTs"] == "timestamp"
+    def test_trade_preset_has_quote_columns(self):
+        """Test trade preset maps quote/TOB columns."""
+        assert TRADE_PRESET["bid"] == "bid_px0"
+        assert TRADE_PRESET["ask"] == "ask_px0"
+        assert TRADE_PRESET["bsize"] == "bid_size0"
+        assert TRADE_PRESET["asize"] == "ask_size0"
+        assert TRADE_PRESET["quoteTs"] == "timestamp"
 
-    def test_ylin_has_position_columns(self):
-        """Test YLIN maps position columns."""
-        assert YLIN["pos"] == "current_net_pos"
-        assert YLIN["startPos"] == "init_net_pos"
-        assert YLIN["cumBuy"] == "cum_buy"
-        assert YLIN["cumSell"] == "cum_sell"
+    def test_trade_preset_has_position_columns(self):
+        """Test trade preset maps position columns."""
+        assert TRADE_PRESET["pos"] == "current_net_pos"
+        assert TRADE_PRESET["startPos"] == "init_net_pos"
+        assert TRADE_PRESET["cumBuy"] == "cum_buy"
+        assert TRADE_PRESET["cumSell"] == "cum_sell"
 
-    def test_ylin_total_mappings(self):
-        """Test YLIN has expected number of mappings."""
-        assert len(YLIN) == 52
+    def test_trade_preset_total_mappings(self):
+        """Test trade preset has expected number of mappings."""
+        assert len(TRADE_PRESET) == 52
 
 
 class TestScanTrade:
