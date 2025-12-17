@@ -3,7 +3,7 @@
 import polars as pl
 import pytest
 
-from vizflow import Config, aggregate, bin, parse_time, set_config
+from vizflow import Config, aggregate, bin, forward_return, parse_time, set_config
 
 
 class TestParseTime:
@@ -212,3 +212,125 @@ class TestAggregate:
         ).collect()
         # vwap = (100*10 + 110*20) / (10+20) = 3200/30 = 106.67
         assert result["vwap"][0] == pytest.approx(106.666666, rel=1e-4)
+
+
+class TestForwardReturn:
+    """Tests for forward_return function (two-DataFrame design)."""
+
+    def test_single_horizon_60s(self):
+        """60 second horizon creates forward_mid_60s and y_60s columns."""
+        # Trade: one trade at t=0
+        df_trade = pl.DataFrame({
+            "ukey": [1],
+            "elapsed_alpha_ts": [0],  # trade at t=0
+            "mid": [100.0],
+        }).lazy()
+
+        # Alpha: prices over time
+        df_alpha = pl.DataFrame({
+            "ukey": [1, 1, 1],
+            "elapsed_ticktime": [0, 60000, 120000],  # 0s, 60s, 120s
+            "mid": [100.0, 101.0, 102.0],
+        }).lazy()
+
+        result = forward_return(df_trade, df_alpha, horizons=[60]).collect()
+
+        assert "forward_mid_60s" in result.columns
+        assert "y_60s" in result.columns
+        # Trade at t=0: future price at 60s = 101, return = (101-100)/100 = 0.01
+        assert result["forward_mid_60s"][0] == pytest.approx(101.0, rel=1e-6)
+        assert result["y_60s"][0] == pytest.approx(0.01, rel=1e-6)
+
+    def test_horizon_3m_naming(self):
+        """180 second (3 min) horizon creates forward_mid_3m and y_3m columns."""
+        df_trade = pl.DataFrame({
+            "ukey": [1],
+            "elapsed_alpha_ts": [0],
+            "mid": [100.0],
+        }).lazy()
+
+        df_alpha = pl.DataFrame({
+            "ukey": [1, 1],
+            "elapsed_ticktime": [0, 180000],  # 0s, 180s
+            "mid": [100.0, 103.0],
+        }).lazy()
+
+        result = forward_return(df_trade, df_alpha, horizons=[180]).collect()
+
+        assert "forward_mid_3m" in result.columns
+        assert "y_3m" in result.columns
+        assert result["forward_mid_3m"][0] == pytest.approx(103.0, rel=1e-6)
+        assert result["y_3m"][0] == pytest.approx(0.03, rel=1e-6)
+
+    def test_multiple_horizons(self):
+        """Multiple horizons create multiple forward_* and y_* columns."""
+        df_trade = pl.DataFrame({
+            "ukey": [1],
+            "elapsed_alpha_ts": [0],
+            "mid": [100.0],
+        }).lazy()
+
+        df_alpha = pl.DataFrame({
+            "ukey": [1, 1, 1, 1],
+            "elapsed_ticktime": [0, 60000, 180000, 1800000],
+            "mid": [100.0, 101.0, 103.0, 110.0],
+        }).lazy()
+
+        result = forward_return(df_trade, df_alpha, horizons=[60, 180, 1800]).collect()
+
+        assert "forward_mid_60s" in result.columns
+        assert "forward_mid_3m" in result.columns
+        assert "forward_mid_30m" in result.columns
+        assert "y_60s" in result.columns
+        assert "y_3m" in result.columns
+        assert "y_30m" in result.columns
+
+    def test_per_symbol_calculation(self):
+        """Forward returns calculated separately per symbol."""
+        # Two trades, one per symbol
+        df_trade = pl.DataFrame({
+            "ukey": [1, 2],
+            "elapsed_alpha_ts": [0, 0],
+            "mid": [100.0, 200.0],
+        }).lazy()
+
+        # Alpha prices for both symbols
+        df_alpha = pl.DataFrame({
+            "ukey": [1, 1, 2, 2],
+            "elapsed_ticktime": [0, 60000, 0, 60000],
+            "mid": [100.0, 110.0, 200.0, 220.0],
+        }).lazy()
+
+        result = forward_return(df_trade, df_alpha, horizons=[60]).collect()
+        result = result.sort("ukey")
+
+        # Symbol 1: (110-100)/100 = 0.10
+        assert result.filter(pl.col("ukey") == 1)["y_60s"][0] == pytest.approx(0.10, rel=1e-6)
+        # Symbol 2: (220-200)/200 = 0.10
+        assert result.filter(pl.col("ukey") == 2)["y_60s"][0] == pytest.approx(0.10, rel=1e-6)
+
+    def test_preserves_trade_columns(self):
+        """Trade columns preserved after forward_return."""
+        df_trade = pl.DataFrame({
+            "ukey": [1],
+            "elapsed_alpha_ts": [0],
+            "mid": [100.0],
+            "order_side": ["Buy"],
+            "fill_price": [100.05],
+        }).lazy()
+
+        df_alpha = pl.DataFrame({
+            "ukey": [1, 1],
+            "elapsed_ticktime": [0, 60000],
+            "mid": [100.0, 101.0],
+        }).lazy()
+
+        result = forward_return(df_trade, df_alpha, horizons=[60]).collect()
+
+        assert "ukey" in result.columns
+        assert "elapsed_alpha_ts" in result.columns
+        assert "mid" in result.columns
+        assert "order_side" in result.columns
+        assert "fill_price" in result.columns
+        assert result["order_side"][0] == "Buy"
+        assert result["fill_price"][0] == pytest.approx(100.05, rel=1e-6)

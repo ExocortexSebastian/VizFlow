@@ -135,3 +135,95 @@ def aggregate(
     """
     agg_exprs = [expr.alias(name) for name, expr in metrics.items()]
     return df.group_by(group_by).agg(agg_exprs)
+
+
+def _horizon_to_suffix(horizon_seconds: int) -> str:
+    """Convert horizon in seconds to column name suffix.
+
+    Rule: ≤60s → use seconds (60s), >60s → use minutes (3m, 30m)
+    """
+    if horizon_seconds <= 60:
+        return f"{horizon_seconds}s"
+    else:
+        minutes = horizon_seconds // 60
+        return f"{minutes}m"
+
+
+def forward_return(
+    df_trade: pl.LazyFrame,
+    df_alpha: pl.LazyFrame,
+    horizons: list[int],
+    trade_time_col: str = "elapsed_alpha_ts",
+    alpha_time_col: str = "elapsed_ticktime",
+    price_col: str = "mid",
+    symbol_col: str = "ukey",
+) -> pl.LazyFrame:
+    """Merge alpha's future price to trade and calculate forward returns.
+
+    For each trade row:
+    1. Look up alpha price at trade_time + horizon
+    2. Add forward_{price_col}_{horizon} column (the future price)
+    3. Calculate y_{horizon} = (forward_price - current_price) / current_price
+
+    Output column names follow the convention:
+    - ≤60s → forward_mid_60s, y_60s
+    - >60s → forward_mid_3m, y_3m
+
+    Args:
+        df_trade: Trade LazyFrame with trade_time_col and price_col
+        df_alpha: Alpha LazyFrame with alpha_time_col and price_col
+        horizons: List of horizon in seconds, e.g., [60, 180, 1800]
+        trade_time_col: Time column in trade df (default: "elapsed_alpha_ts")
+        alpha_time_col: Time column in alpha df (default: "elapsed_ticktime")
+        price_col: Column name for price in both dfs (default: "mid")
+        symbol_col: Symbol column for grouping (default: "ukey")
+
+    Returns:
+        Trade LazyFrame with forward_* and y_* columns added
+
+    Example:
+        >>> df_trade = vf.parse_time(vf.scan_trade(date), "alpha_ts")
+        >>> df_alpha = vf.parse_time(vf.scan_alpha(date), "ticktime")
+        >>> df = vf.forward_return(df_trade, df_alpha, horizons=[60, 180, 1800])
+        >>> # Creates: forward_mid_60s, forward_mid_3m, forward_mid_30m
+        >>> #          y_60s, y_3m, y_30m
+    """
+    # Collect for asof join
+    trade = df_trade.collect()
+    alpha = df_alpha.collect()
+
+    # Prepare alpha lookup table: (symbol, time) -> price
+    alpha_lookup = alpha.select([
+        pl.col(symbol_col),
+        pl.col(alpha_time_col),
+        pl.col(price_col),
+    ]).sort([symbol_col, alpha_time_col])
+
+    for horizon in horizons:
+        suffix = _horizon_to_suffix(horizon)
+        horizon_ms = horizon * 1000
+        forward_col = f"forward_{price_col}_{suffix}"
+        return_col = f"y_{suffix}"
+
+        # Add target time column for this horizon
+        trade = trade.with_columns(
+            (pl.col(trade_time_col) + horizon_ms).alias("_forward_time")
+        )
+
+        # Asof join: find alpha price at forward_time
+        joined = trade.join_asof(
+            alpha_lookup.rename({alpha_time_col: "_alpha_time", price_col: "_forward_price"}),
+            left_on="_forward_time",
+            right_on="_alpha_time",
+            by=symbol_col,
+            strategy="nearest",
+            tolerance=1000,  # 1 second tolerance
+        )
+
+        # Add forward price and calculate return
+        trade = joined.with_columns([
+            pl.col("_forward_price").alias(forward_col),
+            ((pl.col("_forward_price") - pl.col(price_col)) / pl.col(price_col)).alias(return_col),
+        ]).drop(["_forward_time", "_alpha_time", "_forward_price"])
+
+    return trade.lazy()
