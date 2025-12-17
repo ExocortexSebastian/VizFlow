@@ -48,7 +48,7 @@ class TestScanTrade:
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            column_preset="ylin",
+            trade_preset="ylin_v20251204",
             market="CN",
         )
         vf.set_config(config)
@@ -76,7 +76,7 @@ class TestScanTrade:
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            column_preset="ylin",
+            trade_preset="ylin_v20251204",
             market="CN",
         )
         vf.set_config(config)
@@ -93,7 +93,7 @@ class TestScanTrade:
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            column_preset="ylin",
+            trade_preset="ylin_v20251204",
             market="CN",
         )
         vf.set_config(config)
@@ -108,7 +108,7 @@ class TestScanTrade:
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            column_preset="ylin",
+            trade_preset="ylin_v20251204",
             market="CN",
         )
         vf.set_config(config)
@@ -127,7 +127,7 @@ class TestScanTrade:
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            column_preset=None,  # No preset
+            trade_preset=None,  # No preset
             market="CN",
         )
         vf.set_config(config)
@@ -149,7 +149,7 @@ class TestScanTrades:
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            column_preset="ylin",
+            trade_preset="ylin_v20251204",
             market="CN",
         )
         vf.set_config(config)
@@ -161,3 +161,29 @@ class TestScanTrades:
         assert "ukey" in cols
         assert "order_side" in cols
         assert "timestamp" in cols
+
+
+class TestUnsupportedFileFormat:
+    """Test error handling for unsupported file formats."""
+
+    def test_unsupported_extension_raises_error(self):
+        """Test that unsupported file extensions raise a clear error."""
+        from vizflow.io import _scan_file
+
+        with pytest.raises(ValueError, match="Unsupported file format"):
+            _scan_file("/data/trade.unknown")
+
+    def test_error_message_lists_supported_formats(self):
+        """Test error message lists all supported formats."""
+        from vizflow.io import _scan_file
+
+        try:
+            _scan_file("/data/trade.xyz")
+        except ValueError as e:
+            error_msg = str(e)
+            assert ".feather" in error_msg
+            assert ".ipc" in error_msg
+            assert ".arrow" in error_msg
+            assert ".csv" in error_msg
+            assert ".meords" in error_msg
+            assert ".parquet" in error_msg

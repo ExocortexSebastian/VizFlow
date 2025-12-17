@@ -137,3 +137,44 @@ def test_config_with_schema():
     assert "qty" in config.trade_schema
     assert config.trade_schema["qty"].cast_to == pl.Int64
     assert config.trade_schema["price"].cast_to == pl.Float64
+
+
+class TestDateValidation:
+    """Test date validation to prevent path traversal."""
+
+    def test_valid_date_format(self):
+        """Test valid date format is accepted."""
+        config = Config(alpha_dir=Path("/data/alpha"))
+        # Should not raise
+        path = config.get_alpha_path("20241001")
+        assert path == Path("/data/alpha/alpha_20241001.feather")
+
+    def test_path_traversal_attack_rejected(self):
+        """Test path traversal attempts are rejected."""
+        config = Config(alpha_dir=Path("/data/alpha"))
+        with pytest.raises(ValueError, match="Invalid date format"):
+            config.get_alpha_path("../../../etc/passwd")
+
+    def test_short_date_rejected(self):
+        """Test date shorter than 8 characters is rejected."""
+        config = Config(trade_dir=Path("/data/trade"))
+        with pytest.raises(ValueError, match="Invalid date format"):
+            config.get_trade_path("2024101")  # Only 7 digits
+
+    def test_long_date_rejected(self):
+        """Test date longer than 8 characters is rejected."""
+        config = Config(replay_dir=Path("/data/replay"))
+        with pytest.raises(ValueError, match="Invalid date format"):
+            config.get_replay_path("202410011")  # 9 digits
+
+    def test_non_digit_date_rejected(self):
+        """Test date with non-digit characters is rejected."""
+        config = Config(aggregate_dir=Path("/data/partials"))
+        with pytest.raises(ValueError, match="Invalid date format"):
+            config.get_aggregate_path("2024-10-01")  # Contains hyphens
+
+    def test_date_with_slash_rejected(self):
+        """Test date containing slashes is rejected."""
+        config = Config(alpha_dir=Path("/data/alpha"))
+        with pytest.raises(ValueError, match="Invalid date format"):
+            config.get_alpha_path("20241001/../malicious")

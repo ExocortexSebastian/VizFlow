@@ -5,7 +5,7 @@ Usage:
     import vizflow as vf
 """
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 from .config import ColumnSchema, Config, get_config, set_config
 from .io import (

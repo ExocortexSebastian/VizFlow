@@ -10,6 +10,21 @@ from typing import Any
 _global_config: Config | None = None
 
 
+def _validate_date(date: str) -> None:
+    """Validate date string format to prevent path traversal.
+
+    Args:
+        date: Date string to validate
+
+    Raises:
+        ValueError: If date is not exactly 8 digits (YYYYMMDD format)
+    """
+    if not (len(date) == 8 and date.isdigit()):
+        raise ValueError(
+            f"Invalid date format: {date!r}. Expected YYYYMMDD (8 digits)."
+        )
+
+
 @dataclass
 class ColumnSchema:
     """Schema for a column with type casting.
@@ -83,7 +98,11 @@ class Config:
     time_cutoff: int | None = None
 
     def __post_init__(self):
-        """Convert paths to Path objects if needed."""
+        """Convert string paths to Path objects.
+
+        Note: String values for path fields (alpha_dir, trade_dir, calendar_path,
+        replay_dir, aggregate_dir) are automatically converted to Path objects.
+        """
         if isinstance(self.alpha_dir, str):
             self.alpha_dir = Path(self.alpha_dir)
         if isinstance(self.trade_dir, str):
@@ -119,8 +138,9 @@ class Config:
             Full path to alpha file
 
         Raises:
-            ValueError: If alpha_dir is not set
+            ValueError: If alpha_dir is not set or date format is invalid
         """
+        _validate_date(date)
         if self.alpha_dir is None:
             raise ValueError("alpha_dir is not set in Config")
         return self.alpha_dir / self.alpha_pattern.format(date=date)
@@ -135,8 +155,9 @@ class Config:
             Full path to trade file
 
         Raises:
-            ValueError: If trade_dir is not set
+            ValueError: If trade_dir is not set or date format is invalid
         """
+        _validate_date(date)
         if self.trade_dir is None:
             raise ValueError("trade_dir is not set in Config")
         return self.trade_dir / self.trade_pattern.format(date=date)
@@ -152,8 +173,9 @@ class Config:
             Full path to replay output file
 
         Raises:
-            ValueError: If replay_dir is not set
+            ValueError: If replay_dir is not set or date format is invalid
         """
+        _validate_date(date)
         if self.replay_dir is None:
             raise ValueError("replay_dir is not set in Config")
         return self.replay_dir / f"{date}{suffix}"
@@ -169,8 +191,9 @@ class Config:
             Full path to aggregate output file
 
         Raises:
-            ValueError: If aggregate_dir is not set
+            ValueError: If aggregate_dir is not set or date format is invalid
         """
+        _validate_date(date)
         if self.aggregate_dir is None:
             raise ValueError("aggregate_dir is not set in Config")
         return self.aggregate_dir / f"{date}{suffix}"

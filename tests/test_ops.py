@@ -219,61 +219,72 @@ class TestForwardReturn:
 
     def test_single_horizon_60s(self):
         """60 second horizon creates forward_mid_60s and y_60s columns."""
-        # Trade: one trade at t=0
+        # Trade: multiple trades at different times
         df_trade = pl.DataFrame({
-            "ukey": [1],
-            "elapsed_alpha_ts": [0],  # trade at t=0
-            "mid": [100.0],
+            "ukey": [1, 1, 1],
+            "elapsed_alpha_ts": [0, 30000, 60000],  # trades at 0s, 30s, 60s
+            "mid": [100.0, 100.5, 101.0],
         }).lazy()
 
-        # Alpha: prices over time
+        # Alpha: prices every 10 seconds for 2.5 minutes
+        # Simulates realistic tick data with gradual price movement
+        alpha_times = list(range(0, 150001, 10000))  # 0, 10000, 20000, ..., 150000 ms
+        alpha_prices = [100.0 + i * 0.1 for i in range(len(alpha_times))]  # gradual increase
         df_alpha = pl.DataFrame({
-            "ukey": [1, 1, 1],
-            "elapsed_ticktime": [0, 60000, 120000],  # 0s, 60s, 120s
-            "mid": [100.0, 101.0, 102.0],
+            "ukey": [1] * len(alpha_times),
+            "elapsed_ticktime": alpha_times,
+            "mid": alpha_prices,
         }).lazy()
 
         result = forward_return(df_trade, df_alpha, horizons=[60]).collect()
 
         assert "forward_mid_60s" in result.columns
         assert "y_60s" in result.columns
-        # Trade at t=0: future price at 60s = 101, return = (101-100)/100 = 0.01
-        assert result["forward_mid_60s"][0] == pytest.approx(101.0, rel=1e-6)
-        assert result["y_60s"][0] == pytest.approx(0.01, rel=1e-6)
+        # Trade at t=0: forward_time=60000, alpha at 60000 has mid=100.6
+        # return = (100.6 - 100.0) / 100.0 = 0.006
+        assert result["forward_mid_60s"][0] == pytest.approx(100.6, rel=1e-6)
+        assert result["y_60s"][0] == pytest.approx(0.006, rel=1e-6)
 
     def test_horizon_3m_naming(self):
         """180 second (3 min) horizon creates forward_mid_3m and y_3m columns."""
         df_trade = pl.DataFrame({
-            "ukey": [1],
-            "elapsed_alpha_ts": [0],
-            "mid": [100.0],
+            "ukey": [1, 1],
+            "elapsed_alpha_ts": [0, 60000],
+            "mid": [100.0, 100.5],
         }).lazy()
 
+        # Alpha: prices every 30 seconds for 5 minutes
+        alpha_times = list(range(0, 300001, 30000))  # 0, 30000, ..., 300000 ms
+        alpha_prices = [100.0 + i * 0.3 for i in range(len(alpha_times))]
         df_alpha = pl.DataFrame({
-            "ukey": [1, 1],
-            "elapsed_ticktime": [0, 180000],  # 0s, 180s
-            "mid": [100.0, 103.0],
+            "ukey": [1] * len(alpha_times),
+            "elapsed_ticktime": alpha_times,
+            "mid": alpha_prices,
         }).lazy()
 
         result = forward_return(df_trade, df_alpha, horizons=[180]).collect()
 
         assert "forward_mid_3m" in result.columns
         assert "y_3m" in result.columns
-        assert result["forward_mid_3m"][0] == pytest.approx(103.0, rel=1e-6)
-        assert result["y_3m"][0] == pytest.approx(0.03, rel=1e-6)
+        # Trade at t=0: forward_time=180000, alpha at 180000 (index 6) has mid=100.0 + 6*0.3 = 101.8
+        assert result["forward_mid_3m"][0] == pytest.approx(101.8, rel=1e-6)
+        assert result["y_3m"][0] == pytest.approx(0.018, rel=1e-6)
 
     def test_multiple_horizons(self):
         """Multiple horizons create multiple forward_* and y_* columns."""
         df_trade = pl.DataFrame({
-            "ukey": [1],
-            "elapsed_alpha_ts": [0],
-            "mid": [100.0],
+            "ukey": [1, 1, 1],
+            "elapsed_alpha_ts": [0, 60000, 120000],
+            "mid": [100.0, 100.5, 101.0],
         }).lazy()
 
+        # Alpha: prices every 30 seconds for 35 minutes (to cover 30m horizon)
+        alpha_times = list(range(0, 2100001, 30000))  # 0 to 35 minutes
+        alpha_prices = [100.0 + i * 0.05 for i in range(len(alpha_times))]
         df_alpha = pl.DataFrame({
-            "ukey": [1, 1, 1, 1],
-            "elapsed_ticktime": [0, 60000, 180000, 1800000],
-            "mid": [100.0, 101.0, 103.0, 110.0],
+            "ukey": [1] * len(alpha_times),
+            "elapsed_ticktime": alpha_times,
+            "mid": alpha_prices,
         }).lazy()
 
         result = forward_return(df_trade, df_alpha, horizons=[60, 180, 1800]).collect()
@@ -284,6 +295,10 @@ class TestForwardReturn:
         assert "y_60s" in result.columns
         assert "y_3m" in result.columns
         assert "y_30m" in result.columns
+        # Verify no nulls in forward returns
+        assert result["y_60s"].null_count() == 0
+        assert result["y_3m"].null_count() == 0
+        assert result["y_30m"].null_count() == 0
 
     def test_per_symbol_calculation(self):
         """Forward returns calculated separately per symbol."""
@@ -294,35 +309,42 @@ class TestForwardReturn:
             "mid": [100.0, 200.0],
         }).lazy()
 
-        # Alpha prices for both symbols
+        # Alpha prices for both symbols - every 10 seconds for 2 minutes
+        alpha_times = list(range(0, 120001, 10000))
         df_alpha = pl.DataFrame({
-            "ukey": [1, 1, 2, 2],
-            "elapsed_ticktime": [0, 60000, 0, 60000],
-            "mid": [100.0, 110.0, 200.0, 220.0],
+            "ukey": [1] * len(alpha_times) + [2] * len(alpha_times),
+            "elapsed_ticktime": alpha_times + alpha_times,
+            "mid": [100.0 + i * 1.0 for i in range(len(alpha_times))]  # symbol 1: +1 per 10s
+                + [200.0 + i * 2.0 for i in range(len(alpha_times))],  # symbol 2: +2 per 10s
         }).lazy()
 
         result = forward_return(df_trade, df_alpha, horizons=[60]).collect()
         result = result.sort("ukey")
 
-        # Symbol 1: (110-100)/100 = 0.10
-        assert result.filter(pl.col("ukey") == 1)["y_60s"][0] == pytest.approx(0.10, rel=1e-6)
-        # Symbol 2: (220-200)/200 = 0.10
-        assert result.filter(pl.col("ukey") == 2)["y_60s"][0] == pytest.approx(0.10, rel=1e-6)
+        # Symbol 1 at t=0: forward_time=60000, alpha at 60000 (index 6) = 100 + 6*1 = 106
+        # return = (106-100)/100 = 0.06
+        assert result.filter(pl.col("ukey") == 1)["y_60s"][0] == pytest.approx(0.06, rel=1e-6)
+        # Symbol 2 at t=0: forward_time=60000, alpha at 60000 (index 6) = 200 + 6*2 = 212
+        # return = (212-200)/200 = 0.06
+        assert result.filter(pl.col("ukey") == 2)["y_60s"][0] == pytest.approx(0.06, rel=1e-6)
 
     def test_preserves_trade_columns(self):
         """Trade columns preserved after forward_return."""
         df_trade = pl.DataFrame({
-            "ukey": [1],
-            "elapsed_alpha_ts": [0],
-            "mid": [100.0],
-            "order_side": ["Buy"],
-            "fill_price": [100.05],
+            "ukey": [1, 1],
+            "elapsed_alpha_ts": [0, 30000],
+            "mid": [100.0, 100.5],
+            "order_side": ["Buy", "Sell"],
+            "fill_price": [100.05, 100.55],
         }).lazy()
 
+        # Alpha: prices every 10 seconds for 2 minutes
+        alpha_times = list(range(0, 120001, 10000))
+        alpha_prices = [100.0 + i * 0.1 for i in range(len(alpha_times))]
         df_alpha = pl.DataFrame({
-            "ukey": [1, 1],
-            "elapsed_ticktime": [0, 60000],
-            "mid": [100.0, 101.0],
+            "ukey": [1] * len(alpha_times),
+            "elapsed_ticktime": alpha_times,
+            "mid": alpha_prices,
         }).lazy()
 
         result = forward_return(df_trade, df_alpha, horizons=[60]).collect()
@@ -333,4 +355,33 @@ class TestForwardReturn:
         assert "order_side" in result.columns
         assert "fill_price" in result.columns
         assert result["order_side"][0] == "Buy"
+        assert result["order_side"][1] == "Sell"
         assert result["fill_price"][0] == pytest.approx(100.05, rel=1e-6)
+        assert result["fill_price"][1] == pytest.approx(100.55, rel=1e-6)
+
+    def test_zero_price_returns_null(self):
+        """Zero price should return null instead of inf for y_* column."""
+        # Trade with zero price
+        df_trade = pl.DataFrame({
+            "ukey": [1, 1, 1],
+            "elapsed_alpha_ts": [0, 30000, 60000],
+            "mid": [100.0, 0.0, 101.0],  # Zero price at 30s
+        }).lazy()
+
+        # Alpha: prices every 10 seconds for 2.5 minutes
+        alpha_times = list(range(0, 150001, 10000))
+        alpha_prices = [100.0 + i * 0.1 for i in range(len(alpha_times))]
+        df_alpha = pl.DataFrame({
+            "ukey": [1] * len(alpha_times),
+            "elapsed_ticktime": alpha_times,
+            "mid": alpha_prices,
+        }).lazy()
+
+        result = forward_return(df_trade, df_alpha, horizons=[60]).collect()
+
+        # Zero price row should have null return, not inf
+        # Sort to ensure consistent order
+        result = result.sort("elapsed_alpha_ts")
+        assert result["y_60s"][0] is not None  # Normal price: has return
+        assert result["y_60s"][1] is None  # Zero price: null return
+        assert result["y_60s"][2] is not None  # Normal price: has return

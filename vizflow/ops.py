@@ -157,6 +157,7 @@ def forward_return(
     alpha_time_col: str = "elapsed_ticktime",
     price_col: str = "mid",
     symbol_col: str = "ukey",
+    tolerance_ms: int = 5000,
 ) -> pl.LazyFrame:
     """Merge alpha's future price to trade and calculate forward returns.
 
@@ -177,6 +178,7 @@ def forward_return(
         alpha_time_col: Time column in alpha df (default: "elapsed_ticktime")
         price_col: Column name for price in both dfs (default: "mid")
         symbol_col: Symbol column for grouping (default: "ukey")
+        tolerance_ms: Max time difference in ms for asof join (default: 5000)
 
     Returns:
         Trade LazyFrame with forward_* and y_* columns added
@@ -210,6 +212,9 @@ def forward_return(
             (pl.col(trade_time_col) + horizon_ms).alias("_forward_time")
         )
 
+        # Sort by join columns (required for asof join)
+        trade = trade.sort([symbol_col, "_forward_time"])
+
         # Asof join: find alpha price at forward_time
         joined = trade.join_asof(
             alpha_lookup.rename({alpha_time_col: "_alpha_time", price_col: "_forward_price"}),
@@ -217,13 +222,16 @@ def forward_return(
             right_on="_alpha_time",
             by=symbol_col,
             strategy="nearest",
-            tolerance=1000,  # 1 second tolerance
+            tolerance=tolerance_ms,
         )
 
-        # Add forward price and calculate return
+        # Add forward price and calculate return (guard against zero price)
         trade = joined.with_columns([
             pl.col("_forward_price").alias(forward_col),
-            ((pl.col("_forward_price") - pl.col(price_col)) / pl.col(price_col)).alias(return_col),
+            pl.when(pl.col(price_col) != 0)
+            .then((pl.col("_forward_price") - pl.col(price_col)) / pl.col(price_col))
+            .otherwise(pl.lit(None))
+            .alias(return_col),
         ]).drop(["_forward_time", "_alpha_time", "_forward_price"])
 
     return trade.lazy()

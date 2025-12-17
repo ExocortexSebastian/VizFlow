@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import polars as pl
 
-from .config import Config, get_config
+from .config import ColumnSchema, Config, get_config
 
-if TYPE_CHECKING:
-    pass
+
+def _apply_schema(df: pl.LazyFrame, schema: dict[str, ColumnSchema]) -> pl.LazyFrame:
+    """Apply type casting from schema definition.
+
+    Args:
+        df: LazyFrame to apply schema to
+        schema: Mapping from column names to ColumnSchema
+
+    Returns:
+        LazyFrame with type casts applied
+    """
+    for col_name, col_schema in schema.items():
+        df = df.with_columns(pl.col(col_name).cast(col_schema.cast_to))
+    return df
 
 
 def load_alpha(date: str, config: Config | None = None) -> pl.LazyFrame:
@@ -34,12 +44,7 @@ def load_alpha(date: str, config: Config | None = None) -> pl.LazyFrame:
     config = config or get_config()
     path = config.get_alpha_path(date)
     df = pl.scan_ipc(path)
-
-    # Apply schema evolution (type casting)
-    for col_name, schema in config.alpha_schema.items():
-        df = df.with_columns(pl.col(col_name).cast(schema.cast_to))
-
-    return df
+    return _apply_schema(df, config.alpha_schema)
 
 
 def load_trade(date: str, config: Config | None = None) -> pl.LazyFrame:
@@ -64,12 +69,7 @@ def load_trade(date: str, config: Config | None = None) -> pl.LazyFrame:
     config = config or get_config()
     path = config.get_trade_path(date)
     df = pl.scan_ipc(path)
-
-    # Apply schema evolution (type casting)
-    for col_name, schema in config.trade_schema.items():
-        df = df.with_columns(pl.col(col_name).cast(schema.cast_to))
-
-    return df
+    return _apply_schema(df, config.trade_schema)
 
 
 def load_calendar(config: Config | None = None) -> pl.DataFrame:
@@ -121,8 +121,10 @@ def _scan_file(path) -> pl.LazyFrame:
     elif suffix == "parquet":
         return pl.scan_parquet(path)
     else:
-        # Default to IPC
-        return pl.scan_ipc(path)
+        raise ValueError(
+            f"Unsupported file format: .{suffix}. "
+            "Supported: .feather, .ipc, .arrow, .csv, .meords, .parquet"
+        )
 
 
 def scan_trade(date: str, config: Config | None = None) -> pl.LazyFrame:
@@ -191,17 +193,13 @@ def scan_trades(config: Config | None = None) -> pl.LazyFrame:
 def _apply_trade_mapping(df: pl.LazyFrame, config: Config) -> pl.LazyFrame:
     """Apply column rename + schema evolution for trade data."""
     df = _apply_rename(df, config.trade_preset)
-    for col_name, schema in config.trade_schema.items():
-        df = df.with_columns(pl.col(col_name).cast(schema.cast_to))
-    return df
+    return _apply_schema(df, config.trade_schema)
 
 
 def _apply_alpha_mapping(df: pl.LazyFrame, config: Config) -> pl.LazyFrame:
     """Apply column rename + schema evolution for alpha data."""
     df = _apply_rename(df, config.alpha_preset)
-    for col_name, schema in config.alpha_schema.items():
-        df = df.with_columns(pl.col(col_name).cast(schema.cast_to))
-    return df
+    return _apply_schema(df, config.alpha_schema)
 
 
 def _apply_rename(df: pl.LazyFrame, preset: str | None) -> pl.LazyFrame:
