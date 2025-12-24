@@ -216,8 +216,7 @@ def scan_trades(config: Config | None = None) -> pl.LazyFrame:
             df = df.with_columns(pl.lit(date).alias("data_date"))
         dfs.append(df)
 
-    # Use diagonal concat to handle files with different column sets
-    return pl.concat(dfs, how="diagonal")
+    return pl.concat(dfs)
 
 
 def scan_alpha(date: str, config: Config | None = None) -> pl.LazyFrame:
@@ -282,8 +281,7 @@ def scan_alphas(config: Config | None = None) -> pl.LazyFrame:
             df = _apply_schema_evolution(df, schema)
         dfs.append(df)
 
-    # Use diagonal concat to handle files with different column sets
-    return pl.concat(dfs, how="diagonal")
+    return pl.concat(dfs)
 
 
 def scan_univ(date: str, config: Config | None = None) -> pl.LazyFrame:
@@ -352,8 +350,7 @@ def scan_univs(config: Config | None = None) -> pl.LazyFrame:
             df = df.with_columns(pl.lit(date).alias("data_date"))
         dfs.append(df)
 
-    # Use diagonal concat to handle files with different column sets
-    return pl.concat(dfs, how="diagonal")
+    return pl.concat(dfs)
 
 
 def load_calendar(config: Config | None = None) -> pl.DataFrame:
