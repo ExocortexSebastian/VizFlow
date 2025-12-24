@@ -213,7 +213,7 @@ def scan_trades(config: Config | None = None) -> pl.LazyFrame:
             df = _apply_schema_evolution(df, schema)
         date = _extract_date_from_path(f, config.trade_pattern)
         if date:
-            df = df.with_columns(pl.lit(date).alias("data_date"))
+            df = df.with_columns(pl.lit(date).str.to_date("%Y%m%d").alias("data_date"))
         dfs.append(df)
 
     return pl.concat(dfs)
@@ -273,12 +273,16 @@ def scan_alphas(config: Config | None = None) -> pl.LazyFrame:
     schema = _resolve_schema(config.alpha_schema)
 
     # Apply schema evolution per-file BEFORE concat to ensure matching schemas
-    # Note: Alpha files already have data_date column, no need to add it
+    # Note: Alpha files already have data_date column, convert to Date type for consistency
     dfs = []
     for f in files:
         df = _scan_file(f, schema=schema)
         if schema:
             df = _apply_schema_evolution(df, schema)
+        # Convert data_date to Date type (may be Int64 from feather or String from CSV)
+        df = df.with_columns(
+            pl.col("data_date").cast(pl.String).str.to_date("%Y%m%d")
+        )
         dfs.append(df)
 
     return pl.concat(dfs)
@@ -347,7 +351,7 @@ def scan_univs(config: Config | None = None) -> pl.LazyFrame:
             df = _apply_schema_evolution(df, schema)
         date = _extract_date_from_path(f, config.univ_pattern)
         if date:
-            df = df.with_columns(pl.lit(date).alias("data_date"))
+            df = df.with_columns(pl.lit(date).str.to_date("%Y%m%d").alias("data_date"))
         dfs.append(df)
 
     return pl.concat(dfs)
