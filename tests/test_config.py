@@ -2,35 +2,10 @@
 
 from pathlib import Path
 
-import polars as pl
 import pytest
 
-from vizflow import ColumnSchema, Config
-
-
-def test_config_col_mapping_trade():
-    """Test column name mapping for trade data."""
-    config = Config(
-        trade_columns={"timestamp": "fillTs", "price": "fillPrice", "symbol": "ukey"},
-    )
-    assert config.col("timestamp") == "fillTs"
-    assert config.col("timestamp", source="trade") == "fillTs"
-    assert config.col("price") == "fillPrice"
-    assert config.col("symbol") == "ukey"
-    # Fallback to semantic name if not mapped
-    assert config.col("unknown") == "unknown"
-
-
-def test_config_col_mapping_alpha():
-    """Test column name mapping for alpha data."""
-    config = Config(
-        alpha_columns={"timestamp": "ticktime", "price": "mid", "symbol": "ukey"},
-    )
-    assert config.col("timestamp", source="alpha") == "ticktime"
-    assert config.col("price", source="alpha") == "mid"
-    assert config.col("symbol", source="alpha") == "ukey"
-    # Fallback to semantic name if not mapped
-    assert config.col("unknown", source="alpha") == "unknown"
+from vizflow import Config
+from vizflow.schema_evolution import YLIN_V20251204
 
 
 def test_config_path_generation_alpha():
@@ -112,31 +87,28 @@ def test_config_defaults():
     assert config.alpha_pattern == "alpha_{date}.feather"
     assert config.trade_pattern == "trade_{date}.feather"
     assert config.market == "CN"
-    assert config.alpha_columns == {}
-    assert config.trade_columns == {}
-    assert config.alpha_schema == {}
-    assert config.trade_schema == {}
+    assert config.trade_schema is None
+    assert config.alpha_schema is None
     assert config.binwidths == {}
     assert config.horizons == []
 
 
-def test_column_schema():
-    """Test ColumnSchema dataclass."""
-    schema = ColumnSchema(cast_to=pl.Int64)
-    assert schema.cast_to == pl.Int64
-
-
-def test_config_with_schema():
-    """Test Config with schema evolution."""
+def test_config_with_schema_string():
+    """Test Config with schema name string."""
     config = Config(
-        trade_schema={
-            "qty": ColumnSchema(cast_to=pl.Int64),
-            "price": ColumnSchema(cast_to=pl.Float64),
-        },
+        trade_schema="ylin_v20251204",
+        alpha_schema="jyao_v20251114",
     )
-    assert "qty" in config.trade_schema
-    assert config.trade_schema["qty"].cast_to == pl.Int64
-    assert config.trade_schema["price"].cast_to == pl.Float64
+    assert config.trade_schema == "ylin_v20251204"
+    assert config.alpha_schema == "jyao_v20251114"
+
+
+def test_config_with_schema_instance():
+    """Test Config with SchemaEvolution instance."""
+    config = Config(
+        trade_schema=YLIN_V20251204,
+    )
+    assert config.trade_schema is YLIN_V20251204
 
 
 class TestDateValidation:

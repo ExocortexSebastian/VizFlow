@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .schema_evolution import SchemaEvolution
 
 # Global config instance
 _global_config: Config | None = None
@@ -26,21 +29,6 @@ def _validate_date(date: str) -> None:
 
 
 @dataclass
-class ColumnSchema:
-    """Schema for a column with type casting.
-
-    Attributes:
-        cast_to: Target type after casting (e.g. pl.Int64)
-
-    Example:
-        # Handle float precision errors: 1.00000002 → 1
-        ColumnSchema(cast_to=pl.Int64)
-    """
-
-    cast_to: Any  # pl.DataType, but avoid import for now
-
-
-@dataclass
 class Config:
     """Central configuration for a pipeline run.
 
@@ -53,14 +41,20 @@ class Config:
         replay_dir: Directory for FIFO replay output (materialization 1)
         aggregate_dir: Directory for aggregation output (materialization 2)
         market: Market identifier, e.g. "CN"
-        alpha_columns: Mapping from semantic names to alpha column names
-        trade_columns: Mapping from semantic names to trade column names
-        alpha_schema: Schema evolution for alpha columns
-        trade_schema: Schema evolution for trade columns
+        trade_schema: Schema evolution for trade data (name or SchemaEvolution)
+        alpha_schema: Schema evolution for alpha data (name or SchemaEvolution)
         binwidths: Mapping from column names to bin widths
         group_by: Columns to group by in aggregation
         horizons: List of forward return horizons in seconds
         time_cutoff: Optional time cutoff (e.g. 143000000 for 14:30:00)
+
+    Example:
+        >>> config = vf.Config(
+        ...     trade_dir=Path("data/ylin/trade"),
+        ...     trade_pattern="{date}.meords",
+        ...     trade_schema="ylin_v20251204",  # Use registered schema by name
+        ...     market="CN",
+        ... )
     """
 
     # === Input Paths ===
@@ -68,6 +62,8 @@ class Config:
     alpha_pattern: str = "alpha_{date}.feather"
     trade_dir: Path | None = None
     trade_pattern: str = "trade_{date}.feather"
+    univ_dir: Path | None = None
+    univ_pattern: str = "{date}.csv"
     calendar_path: Path | None = None
 
     # === Output Paths ===
@@ -77,17 +73,11 @@ class Config:
     # === Market ===
     market: str = "CN"
 
-    # === Column Mapping ===
-    alpha_columns: dict[str, str] = field(default_factory=dict)
-    trade_columns: dict[str, str] = field(default_factory=dict)
-
     # === Schema Evolution ===
-    alpha_schema: dict[str, ColumnSchema] = field(default_factory=dict)
-    trade_schema: dict[str, ColumnSchema] = field(default_factory=dict)
-
-    # === Column Mapping Presets ===
-    trade_preset: str | None = None  # "ylin" or None
-    alpha_preset: str | None = None  # "jyao_v20251114" or None
+    # Can be a string (schema name) or SchemaEvolution instance
+    trade_schema: str | SchemaEvolution | None = None
+    alpha_schema: str | SchemaEvolution | None = None
+    univ_schema: str | SchemaEvolution | None = None
 
     # === Aggregation ===
     binwidths: dict[str, float] = field(default_factory=dict)
@@ -100,33 +90,22 @@ class Config:
     def __post_init__(self):
         """Convert string paths to Path objects.
 
-        Note: String values for path fields (alpha_dir, trade_dir, calendar_path,
-        replay_dir, aggregate_dir) are automatically converted to Path objects.
+        Note: String values for path fields (alpha_dir, trade_dir, univ_dir,
+        calendar_path, replay_dir, aggregate_dir) are automatically converted
+        to Path objects.
         """
         if isinstance(self.alpha_dir, str):
             self.alpha_dir = Path(self.alpha_dir)
         if isinstance(self.trade_dir, str):
             self.trade_dir = Path(self.trade_dir)
+        if isinstance(self.univ_dir, str):
+            self.univ_dir = Path(self.univ_dir)
         if isinstance(self.calendar_path, str):
             self.calendar_path = Path(self.calendar_path)
         if isinstance(self.replay_dir, str):
             self.replay_dir = Path(self.replay_dir)
         if isinstance(self.aggregate_dir, str):
             self.aggregate_dir = Path(self.aggregate_dir)
-
-    def col(self, semantic: str, source: str = "trade") -> str:
-        """Get actual column name from semantic name.
-
-        Args:
-            semantic: Semantic column name (e.g. "timestamp", "price")
-            source: "alpha" or "trade"
-
-        Returns:
-            Actual column name, or the semantic name if no mapping exists
-        """
-        if source == "alpha":
-            return self.alpha_columns.get(semantic, semantic)
-        return self.trade_columns.get(semantic, semantic)
 
     def get_alpha_path(self, date: str) -> Path:
         """Get alpha file path for a date.
@@ -161,6 +140,23 @@ class Config:
         if self.trade_dir is None:
             raise ValueError("trade_dir is not set in Config")
         return self.trade_dir / self.trade_pattern.format(date=date)
+
+    def get_univ_path(self, date: str) -> Path:
+        """Get universe file path for a date.
+
+        Args:
+            date: Date string, e.g. "20241001"
+
+        Returns:
+            Full path to univ file
+
+        Raises:
+            ValueError: If univ_dir is not set or date format is invalid
+        """
+        _validate_date(date)
+        if self.univ_dir is None:
+            raise ValueError("univ_dir is not set in Config")
+        return self.univ_dir / self.univ_pattern.format(date=date)
 
     def get_replay_path(self, date: str, suffix: str = ".parquet") -> Path:
         """Get replay output file path for a date (FIFO results).

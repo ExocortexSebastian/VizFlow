@@ -235,3 +235,102 @@ def forward_return(
         ]).drop(["_forward_time", "_alpha_time", "_forward_price"])
 
     return trade.lazy()
+
+
+def mark_to_close(
+    df_trade: pl.LazyFrame,
+    df_univ: pl.LazyFrame,
+    mid_col: str = "mid",
+    close_col: str = "close",
+    symbol_col: str = "ukey",
+) -> pl.LazyFrame:
+    """Add mark-to-close return column.
+
+    Joins trade with universe data to get close price, then calculates:
+    y_close = (close - mid) / mid
+
+    Args:
+        df_trade: Trade LazyFrame with mid_col and symbol_col
+        df_univ: Universe LazyFrame with close_col and symbol_col
+        mid_col: Column name for mid price in trade df (default: "mid")
+        close_col: Column name for close price in univ df (default: "close")
+        symbol_col: Symbol column for joining (default: "ukey")
+
+    Returns:
+        Trade LazyFrame with y_close column added
+
+    Example:
+        >>> df_trade = vf.scan_trade(date)
+        >>> df_univ = vf.scan_univ(date)
+        >>> df = vf.mark_to_close(df_trade, df_univ)
+        >>> # Creates: y_close
+    """
+    # Select only needed columns from univ to avoid column conflicts
+    univ_cols = [symbol_col, close_col]
+    # Check if data_date exists in both for multi-day joining
+    trade_schema = df_trade.collect_schema()
+    univ_schema = df_univ.collect_schema()
+
+    if "data_date" in trade_schema.names() and "data_date" in univ_schema.names():
+        # Multi-day case: join on symbol and date
+        join_cols = [symbol_col, "data_date"]
+        univ_cols.append("data_date")
+    else:
+        # Single-day case: join on symbol only
+        join_cols = [symbol_col]
+
+    # Join with univ to get close price
+    df = df_trade.join(
+        df_univ.select(univ_cols),
+        on=join_cols,
+        how="left",
+    )
+
+    # Calculate return (guard against zero mid)
+    df = df.with_columns(
+        pl.when(pl.col(mid_col) != 0)
+        .then((pl.col(close_col) - pl.col(mid_col)) / pl.col(mid_col))
+        .otherwise(pl.lit(None))
+        .alias("y_close")
+    )
+
+    return df
+
+
+def sign_by_side(
+    df: pl.LazyFrame,
+    cols: list[str],
+    side_col: str = "order_side",
+) -> pl.LazyFrame:
+    """Sign return columns by order side.
+
+    For Buy trades: keep sign as-is (price going up = positive = good)
+    For Sell trades: negate sign (price going down = positive = good)
+
+    This makes all returns have consistent interpretation:
+    positive = favorable price move for that order side
+
+    Args:
+        df: LazyFrame with return columns
+        cols: List of column names to sign (e.g., ["y_10m", "y_30m", "y_close"])
+        side_col: Column containing order side (default: "order_side")
+            Expected values: "Buy" or "Sell"
+
+    Returns:
+        LazyFrame with signed return columns
+
+    Example:
+        >>> df = vf.sign_by_side(df, cols=["y_10m", "y_30m", "y_close"])
+        >>> # All y_* columns now have positive = favorable for that side
+    """
+    signed_exprs = []
+    for col in cols:
+        signed = (
+            pl.when(pl.col(side_col) == "Sell")
+            .then(-pl.col(col))
+            .otherwise(pl.col(col))
+            .alias(col)
+        )
+        signed_exprs.append(signed)
+
+    return df.with_columns(signed_exprs)

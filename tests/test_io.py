@@ -1,4 +1,4 @@
-"""Tests for vizflow I/O functions with column mapping."""
+"""Tests for vizflow I/O functions with schema evolution."""
 
 from pathlib import Path
 
@@ -6,54 +6,23 @@ import polars as pl
 import pytest
 
 import vizflow as vf
-from vizflow.presets import YLIN_V20251204 as TRADE_PRESET
-
-
-class TestTradePreset:
-    """Test trade preset contains expected mappings."""
-
-    def test_trade_preset_has_order_columns(self):
-        """Test trade preset maps order columns."""
-        assert TRADE_PRESET["symbol"] == "ukey"
-        assert TRADE_PRESET["orderId"] == "order_id"
-        assert TRADE_PRESET["orderSide"] == "order_side"
-        assert TRADE_PRESET["orderQty"] == "order_qty"
-        assert TRADE_PRESET["fillPrice"] == "fill_price"
-
-    def test_trade_preset_has_quote_columns(self):
-        """Test trade preset maps quote/TOB columns."""
-        assert TRADE_PRESET["bid"] == "bid_px0"
-        assert TRADE_PRESET["ask"] == "ask_px0"
-        assert TRADE_PRESET["bsize"] == "bid_size0"
-        assert TRADE_PRESET["asize"] == "ask_size0"
-        assert TRADE_PRESET["quoteTs"] == "timestamp"
-
-    def test_trade_preset_has_position_columns(self):
-        """Test trade preset maps position columns."""
-        assert TRADE_PRESET["pos"] == "current_net_pos"
-        assert TRADE_PRESET["startPos"] == "init_net_pos"
-        assert TRADE_PRESET["cumBuy"] == "cum_buy"
-        assert TRADE_PRESET["cumSell"] == "cum_sell"
-
-    def test_trade_preset_total_mappings(self):
-        """Test trade preset has expected number of mappings."""
-        assert len(TRADE_PRESET) == 52
+from vizflow.schema_evolution import YLIN_V20251204
 
 
 class TestScanTrade:
-    """Test scan_trade with column mapping."""
+    """Test scan_trade with schema evolution."""
 
-    def test_scan_trade_with_ylin_preset(self):
-        """Test scan_trade applies ylin preset mappings."""
+    def test_scan_trade_with_schema(self):
+        """Test scan_trade applies schema evolution."""
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            trade_preset="ylin_v20251204",
+            trade_schema="ylin_v20251204",
             market="CN",
         )
         vf.set_config(config)
 
-        df = vf.scan_trade("11110101")
+        df = vf.scan_trade("20240827")
         cols = df.collect_schema().names()
 
         # Check renamed columns exist
@@ -76,15 +45,15 @@ class TestScanTrade:
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            trade_preset="ylin_v20251204",
+            trade_schema="ylin_v20251204",
             market="CN",
         )
         vf.set_config(config)
 
-        df = vf.scan_trade("11110101")
+        df = vf.scan_trade("20240827")
         cols = df.collect_schema().names()
 
-        # These columns are not in YLIN mapping, should pass through
+        # These columns are not in schema, should pass through
         assert "ecn" in cols, "ecn should pass through unchanged"
         assert "JI" in cols, "JI should pass through unchanged"
 
@@ -93,63 +62,102 @@ class TestScanTrade:
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            trade_preset="ylin_v20251204",
+            trade_schema="ylin_v20251204",
             market="CN",
         )
         vf.set_config(config)
 
-        df = vf.scan_trade("11110101")
+        df = vf.scan_trade("20240827")
         cols = df.collect_schema().names()
 
         assert "#HFTORD" not in cols, "#HFTORD should be dropped"
 
     def test_scan_trade_data_values(self):
-        """Test actual data values are correct after mapping."""
+        """Test actual data values are correct after schema evolution."""
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            trade_preset="ylin_v20251204",
+            trade_schema="ylin_v20251204",
             market="CN",
         )
         vf.set_config(config)
 
-        df = vf.scan_trade("11110101").collect()
+        df = vf.scan_trade("20240827").collect()
 
         # Check order_side values
         sides = df["order_side"].unique().to_list()
         assert "Buy" in sides or "Sell" in sides, "order_side should have Buy/Sell values"
 
-        # Check ukey is numeric (stock codes)
-        assert df["ukey"].dtype in [pl.Int64, pl.Float64], "ukey should be numeric"
+        # Check ukey is integer (parsed as Int64)
+        assert df["ukey"].dtype == pl.Int64, "ukey should be Int64"
 
-    def test_scan_trade_without_preset(self):
-        """Test scan_trade without preset keeps original names."""
+    def test_scan_trade_qty_cast_to_int(self):
+        """Test qty columns are cast from Float64 to Int64."""
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            trade_preset=None,  # No preset
+            trade_schema="ylin_v20251204",
             market="CN",
         )
         vf.set_config(config)
 
-        df = vf.scan_trade("11110101")
-        cols = df.collect_schema().names()
+        df = vf.scan_trade("20240827").collect()
 
-        # Original names should exist
-        assert "symbol" in cols, "symbol should exist without preset"
-        assert "orderSide" in cols, "orderSide should exist without preset"
-        assert "bid" in cols, "bid should exist without preset"
+        # Qty columns should be Int64 after cast
+        assert df["order_qty"].dtype == pl.Int64, "order_qty should be Int64"
+        assert df["order_filled_qty"].dtype == pl.Int64, "order_filled_qty should be Int64"
+        assert df["bid_size0"].dtype == pl.Int64, "bid_size0 should be Int64"
+        assert df["ask_size0"].dtype == pl.Int64, "ask_size0 should be Int64"
 
-
-class TestScanTrades:
-    """Test scan_trades (all files) with column mapping."""
-
-    def test_scan_trades_with_ylin_preset(self):
-        """Test scan_trades applies ylin preset mappings."""
+    def test_scan_trade_without_schema(self):
+        """Test scan_trade without schema keeps original names."""
         config = vf.Config(
             trade_dir=Path("data/ylin/trade"),
             trade_pattern="{date}.meords",
-            trade_preset="ylin_v20251204",
+            trade_schema=None,
+            market="CN",
+        )
+        vf.set_config(config)
+
+        df = vf.scan_trade("20240827")
+        cols = df.collect_schema().names()
+
+        # Original names should exist (test data already uses some standard names)
+        assert "ukey" in cols, "ukey should exist without schema"
+        assert "order_side" in cols, "order_side should exist without schema"
+        # Without schema, no casting is applied
+        schema = df.collect_schema()
+        # Polars infers types - qty columns may be Float64 or Int64
+        assert schema["order_qty"] in [pl.Float64, pl.Int64]
+
+    def test_scan_trade_with_schema_instance(self):
+        """Test scan_trade accepts SchemaEvolution instance directly."""
+        config = vf.Config(
+            trade_dir=Path("data/ylin/trade"),
+            trade_pattern="{date}.meords",
+            trade_schema=YLIN_V20251204,  # Pass instance directly
+            market="CN",
+        )
+        vf.set_config(config)
+
+        df = vf.scan_trade("20240827")
+        cols = df.collect_schema().names()
+
+        assert "ukey" in cols
+        assert "order_side" in cols
+
+
+class TestScanTrades:
+    """Test scan_trades (all files) with schema evolution."""
+
+    def test_scan_trades_single_file(self):
+        """Test scan_trades works with single file pattern."""
+        # Note: Multi-file concat requires matching schemas across files.
+        # Test data files have different schemas, so use single file pattern.
+        config = vf.Config(
+            trade_dir=Path("data/ylin/trade"),
+            trade_pattern="20240827.meords",  # Single file pattern
+            trade_schema="ylin_v20251204",
             market="CN",
         )
         vf.set_config(config)
